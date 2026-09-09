@@ -1,0 +1,1 @@
+Loads the weekly province data file and adds the time based features every later script needs: the week number written as a repeating yearly cycle, the previous two weeks of disease incidence, and the week over week change in incidence, filling in any missing values using the training year averages.

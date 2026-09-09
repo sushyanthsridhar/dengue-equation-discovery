@@ -1,0 +1,1 @@
+Computes per province dengue incidence and its rate of change from the merged feature panel, then scales every column to zero to one for the pipeline, incidence is verified exact, the two derivative columns are a reasonable but unverified placeholder.

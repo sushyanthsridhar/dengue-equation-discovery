@@ -1,0 +1,9 @@
+val_mse=0.001214
+latent_dim=10
+hidden_dims=[512,256]
+dropout=0.0087
+lr=0.00062
+weight_decay=0.00056
+batch_size=128
+activation=elu
+use_batchnorm=True

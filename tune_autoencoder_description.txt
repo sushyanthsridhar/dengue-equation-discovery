@@ -1,0 +1,1 @@
+Runs the same 100 trial search as autoencoder.py to pick the best summary size and network settings, without going on to do the final training run.

@@ -1,0 +1,1 @@
+Loads the trained autoencoder and checks how well it reconstructs the original 36 features on the sealed 2022-2023 test years, reporting both an overall accuracy score and a breakdown by individual feature.

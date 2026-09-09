@@ -1,0 +1,1 @@
+Trains the autoencoder using the winning settings from the search, on the training and validation years, and saves the resulting 10 number per week summary for every province, which the rest of the pipeline uses downstream.
