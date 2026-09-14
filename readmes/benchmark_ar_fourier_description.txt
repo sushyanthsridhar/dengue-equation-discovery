@@ -1,0 +1,1 @@
+Fits the pooled, non-hierarchical comparison baselines that do not involve the discovered equation at all: a seasonal-naive baseline, a plain persistence baseline, an autoregressive model on the province's own lags, and the same autoregressive model with fixed annual/semi-annual Fourier terms added.

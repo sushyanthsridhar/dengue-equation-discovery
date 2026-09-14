@@ -1,0 +1,1 @@
+Runs the LLM term proposer and a matched random term proposer side by side, same starting equation, same data, same number of candidates per round, across 5 seeds, so the two can be compared on equal footing. Used to show the LLM's proposals are actually better than an equal-sized batch of random ones, not just more numerous.

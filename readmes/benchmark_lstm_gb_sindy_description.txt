@@ -1,0 +1,1 @@
+Fits three further pooled comparison baselines: a direct one-step LSTM regressor, a Gradient Boosting regressor, and a fixed-library SINDy fit that uses the same base term library as the main pipeline but with no FunSearch discovery, no LLM terms, and no hierarchical decomposition.

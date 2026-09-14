@@ -1,0 +1,1 @@
+Logs how long each LLM proposal round actually takes, how much memory it uses, and how many of its suggestions parse, validate, and survive screening, across repeated rounds and seeds. This is the runtime/reliability accounting for the LLM step, not an accuracy measurement.

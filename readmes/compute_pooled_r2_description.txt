@@ -1,0 +1,1 @@
+Refits the winning model five independent times (the stability sweep reported throughout the paper) and, for each run, computes one-week-ahead test R2 two ways: pooled across every province-week at once, and averaged per province. Writes the per-run numbers and their mean/std across runs.
