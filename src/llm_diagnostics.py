@@ -1,8 +1,4 @@
 """
-REFEREE REPORT addendum: "strongly recommended if inexpensive" item under
-Section 5 -- "LLM parse-failure, acceptance, runtime, and memory
-diagnostics."
-
 Parse-failure and acceptance (valid proposals, parse failures, retained
 proposals, evaluations-to-best-validation) are already reported by
 llm_vs_random_matched_experiment.py. This script adds the two pieces still
@@ -65,18 +61,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 _stdout_before, _stderr_before = sys.stdout, sys.stderr
-try:
-    import forecast as F
-except ModuleNotFoundError:
-    import forecast_temporal_fix as F
-# forecast.py / forecast_temporal_fix.py redirects stdout/stderr to its own
+import forecast as F
+# forecast.py redirects stdout/stderr to its own
 # log file as a side effect of import; put ours back for this script's own
 # console output.
 sys.stdout, sys.stderr = _stdout_before, _stderr_before
 
 print('[llm-diagnostics] imported', F.__name__)
 
-OUT_DIR = F.OUT_DIR
+OUT_DIR = os.path.join(os.path.dirname(HERE), 'results')  # NOT F.OUT_DIR ('outputs/'), which is unused/stale in this repo -- results/ is where every other output actually lives
 os.makedirs(OUT_DIR, exist_ok=True)
 
 N_SEEDS = 3

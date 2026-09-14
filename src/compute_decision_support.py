@@ -4,15 +4,11 @@ pipeline (referee point 2.1 temporal-split fix).
 
 WHY THIS SCRIPT EXISTS:
 The old \\section{Results} in the manuscript reports an alert-threshold sweep,
-a province risk ranking, and reliability flags, but those numbers came from
-running forecast.py's own __main__ block, which writes everything to
-OUT_DIR = 'outputs/' -- a folder that does not exist anywhere in either
-Final_Repo or referee_report (confirmed by direct search). Whatever run
-originally produced those numbers is not reproducible from anything on disk,
-and it predates the corrected temporal split described in Section 1 of
-results_report.txt. This script regenerates the same four decision-support
-artifacts fresh, under the corrected split and the current production model,
-using forecast_temporal_fix.py's own functions unmodified:
+a province risk ranking, and reliability flags, by running forecast.py's
+own decision-support functions directly rather than through its __main__
+block, so the outputs land in results/ (where every other output in this
+repo lives) instead of forecast.py's own unused OUT_DIR ('outputs/'). It
+reuses forecast.py's functions unmodified:
 compute_risk_ranking, compute_reliability_flags, backtest_lead_time, and
 summarize_backtest -- plus the same forward multi-step forecast and driver
 attribution the old Results section's per-province forecasts came from.
@@ -29,7 +25,7 @@ Usage:
     python3 compute_decision_support.py
 
 Writes (to ./results/, matching where every other results/*.csv in this
-project actually lives, not forecast_temporal_fix.py's own unused OUT_DIR):
+repo lives):
     results/risk_ranking.csv
     results/reliability_flags.csv
     results/backtest_lead_time_raw.csv
@@ -39,10 +35,7 @@ project actually lives, not forecast_temporal_fix.py's own unused OUT_DIR):
 """
 import os
 
-try:
-    import forecast as F
-except ImportError:
-    import forecast_temporal_fix as F
+import forecast as F
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
 OUT_DIR = os.path.join(HERE, 'results')

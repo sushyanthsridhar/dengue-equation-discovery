@@ -27,7 +27,7 @@ DATA_CSV = os.path.join(PARENT, 'extended_input_normalized.csv')
 LATENT_CSV = os.path.join(PARENT, 'latents', 'latent_dim10.csv')
 MODEL_PATH = os.path.join(PARENT, 'models', 'best_model_dim10.pt')
 CLUSTER_CSV = os.path.join(PARENT, 'province_clusters.csv')
-LOG_PATH = os.path.join(HERE, 'forecast_temporal_fix_log.txt')
+LOG_PATH = os.path.join(HERE, 'forecast_log.txt')
 OUT_DIR = os.path.join(HERE, 'outputs')
 os.makedirs(OUT_DIR, exist_ok=True)
 LATENT_DIM = 10
@@ -43,7 +43,7 @@ QUALITY_W_COMPLETE = 0.2
 QUALITY_W_SMOOTH = 0.35
 QUALITY_W_STABLE = 0.2
 QUALITY_W_CONSIST = 0.25
-# NOTE, run discover_equation_temporal_fix.py FIRST and check its
+# NOTE, run discover_equation.py FIRST and check its
 # discover_equation_grid_results.csv, the corrected 2018-only inner
 # validation may crown a different grid cell than tau4_bayesian_ridge_spread.
 # Update the four constants below to match whatever wins before running this file.
@@ -81,9 +81,9 @@ ACTIVE_THRESH = 0.01
 Q_INC_CLIP_LO = Q_INIT_INC * 0.1
 Q_INC_CLIP_HI = Q_INIT_INC * 20.0
 OLLAMA_URL = 'http://localhost:11434/api/chat'
-OLLAMA_MODEL_PRIMARY = 'llama3.1:8b-instruct'  # referee_report change: try a stronger instruct model first
+OLLAMA_MODEL_PRIMARY = 'llama3.1:8b-instruct'  # preferred model; falls back to mistral:latest if unavailable via Ollama
 OLLAMA_MODEL_FALLBACK = 'mistral:latest'  # used automatically if the primary model is not pulled locally
-MAX_LLM_ROUNDS = 4  # referee_report change: was 1, raised so the round over round feedback loop the prompt already promises actually runs
+MAX_LLM_ROUNDS = 4  # raised from 1 so the round-over-round feedback loop the prompt promises actually runs, now that only the single winning cell is being refit here
 R2_WEIGHT, SPECTRAL_WEIGHT = (0.65, 0.35)
 KEY_PERIODS, SPECTRAL_BIN_WINDOW = ([52, 26], 2)
 ISLAND_BIAS_TABLE = {0: (range(3, 5), 0, 'lasso'), 1: (range(5, 6), 0, 'ridge'), 2: (range(6, 9), 0, 'elasticnet'), 3: (range(4, 6), 3, 'bayesian_ridge'), 4: (range(3, 5), 0, 'ridge'), 5: (range(5, 6), 0, 'lasso'), 6: (range(6, 9), 2, 'elasticnet'), 7: (range(4, 6), 3, 'ridge'), 8: (range(3, 5), 0, 'lasso'), 9: (range(5, 7), 1, 'bayesian_ridge')}

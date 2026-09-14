@@ -8,7 +8,7 @@ forecast.py's own main block already builds main_benchmark_table.csv with a
 model itself. This script fills that specific gap, using the exact same
 production model-fitting and evaluation code forecast.py already uses
 (fit_winning_model, evaluate_on_split), so the numbers are directly
-comparable to everything already in results_report.txt and to
+comparable to the other stability-sweep summaries in this repo and to
 benchmark_lstm_gb_sindy.py / benchmark_ar_fourier.py, which already report
 pooled test R2 for the other baselines.
 

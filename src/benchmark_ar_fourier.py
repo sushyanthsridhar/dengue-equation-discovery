@@ -37,14 +37,9 @@ hierarchical) plain linear regressions (ordinary least squares), fit on
 TRAIN+VAL and evaluated once on TEST, with a val_r2 also reported from a
 TRAIN-only fit evaluated on VAL for completeness.
 
-Run this AFTER forecast.py (or forecast_temporal_fix.py) has been run at
-least once, for the same reason the other benchmark scripts need it: it
-picks n_lags from the winning FunSearch program.
-
-This file works unchanged whether it sits next to forecast_temporal_fix.py
-(in referee_report/) or has been promoted next to forecast.py (in
-Final_Repo/) -- same fallback-import pattern as the other benchmark
-scripts.
+Run this AFTER forecast.py has been run at least once, for the same
+reason the other benchmark scripts need it: it picks n_lags from the
+winning FunSearch program.
 
 Usage:
     python3 benchmark_ar_fourier.py
@@ -70,18 +65,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 _stdout_before, _stderr_before = sys.stdout, sys.stderr
-try:
-    import forecast as F
-except ModuleNotFoundError:
-    import forecast_temporal_fix as F
-# forecast.py / forecast_temporal_fix.py redirects stdout/stderr to its own
+import forecast as F
+# forecast.py redirects stdout/stderr to its own
 # log file as a side effect of import; put ours back for this script's own
 # console output.
 sys.stdout, sys.stderr = _stdout_before, _stderr_before
 
 print('[ar-fourier] imported', F.__name__, '-- data, scaler and splits loaded from it')
 
-OUT_DIR = F.OUT_DIR
+OUT_DIR = os.path.join(os.path.dirname(HERE), 'results')  # NOT F.OUT_DIR ('outputs/'), which is unused/stale in this repo -- results/ is where every other output actually lives
 os.makedirs(OUT_DIR, exist_ok=True)
 
 train_pd = F._build_province_dict(F.latent, F.TRAIN_YEARS)

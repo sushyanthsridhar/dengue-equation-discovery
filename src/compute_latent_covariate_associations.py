@@ -5,7 +5,7 @@ computed on training years only (no leakage).
 WHY THIS SCRIPT EXISTS:
 forecast.py's compute_latent_covariate_meaning() already does exactly this
 computation internally, once per stability run, to ground the LLM prompt (see
-its docstring and Section 1 of results_report.txt). It returns only the top-2
+its docstring). It returns only the top-2
 correlations per z-dimension as an inline string for the prompt, and never
 writes them anywhere -- there is no persisted table of these numbers. This
 script reuses forecast.py's own correlation logic unmodified and just saves

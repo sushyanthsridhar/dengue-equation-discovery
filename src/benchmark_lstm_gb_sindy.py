@@ -1,9 +1,6 @@
 """
-REFEREE REPORT addendum: computational items 2 and 3 from the "Section 5 -
-Computational Work" checklist (see referee_report/results_report.txt for the
-rest of the checklist status).
-
-This script adds the two missing benchmark arms without duplicating any data
+This script adds two comparison baselines not covered elsewhere in the
+repo, without duplicating any data
 loading, scaling, splitting, or model-fitting logic: it imports the already
 validated forecast script as a module and reuses its SCALER, TRAIN/VAL/
 TRAINVAL/TEST year splits, quality-gate logic, feature/library builders, and
@@ -33,15 +30,10 @@ already reported on, so the comparison is apples to apples.
    FunSearch/LLM term discovery and the hierarchy, versus a plain fixed
    library fit pooled across provinces.
 
-Run this AFTER forecast.py (or forecast_temporal_fix.py) has been run at
-least once, because it needs the saved winning FunSearch program at
-fs_programs/<label>_best.json to pick a matching n_lags, and it needs the
-same encoder/latent/cluster files forecast.py reads.
-
-This file is meant to work unchanged whether it currently sits next to
-forecast_temporal_fix.py (in referee_report/) or has been promoted next to
-forecast.py (in Final_Repo/) -- the import below tries the plain name first,
-then falls back to the _temporal_fix name.
+Run this AFTER forecast.py has been run at least once, because it needs
+the saved winning FunSearch program at fs_programs/<label>_best.json to
+pick a matching n_lags, and it needs the same encoder/latent/cluster files
+forecast.py reads.
 
 Usage:
     python3 benchmark_lstm_gb_sindy.py
@@ -75,18 +67,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 _stdout_before, _stderr_before = sys.stdout, sys.stderr
-try:
-    import forecast as F
-except ModuleNotFoundError:
-    import forecast_temporal_fix as F
-# forecast.py / forecast_temporal_fix.py redirects stdout/stderr to its own
+import forecast as F
+# forecast.py redirects stdout/stderr to its own
 # log file as a side effect of import; put ours back so this script's own
 # progress prints go to the console the user is watching.
 sys.stdout, sys.stderr = _stdout_before, _stderr_before
 
 print('[benchmark] imported', F.__name__, '-- data, scaler and splits loaded from it')
 
-OUT_DIR = F.OUT_DIR
+OUT_DIR = os.path.join(os.path.dirname(HERE), 'results')  # NOT F.OUT_DIR ('outputs/'), which is unused/stale in this repo -- results/ is where every other output actually lives
 os.makedirs(OUT_DIR, exist_ok=True)
 
 train_pd = F._build_province_dict(F.latent, F.TRAIN_YEARS)

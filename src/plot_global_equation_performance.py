@@ -2,11 +2,11 @@
 Paper figure: global equation performance -- predicted vs. actual incidence
 over time.
 
-This is not a referee-report item; it produces the figure Sushi needs for
-the results section showing how well the discovered, hierarchically fit
-equation tracks real dengue incidence, aggregated across all 28 provinces,
-across the whole modeled record (2015-2019 fit period, then the 2022-2023
-held-out test period).
+It produces the figure and tables for Section 5.8 (Global Equation
+Performance Over Time), showing how well the discovered, hierarchically
+fit equation tracks real dengue incidence, aggregated across all 28
+provinces, across the whole modeled record (2015-2019 fit period, then the
+2022-2023 held-out test period).
 
 WHAT IT DOES:
   1. Runs forecast.py's fit_winning_model() to produce the actual final
@@ -14,13 +14,14 @@ WHAT IT DOES:
      live LLM term-proposal round loop (MAX_LLM_ROUNDS rounds, real Ollama
      calls -- same as every real run of this pipeline; not cached, so this
      takes a few minutes and each run's exact LLM-proposed terms can vary
-     slightly, same caveat noted throughout results_report.txt).
+     slightly, same caveat noted throughout the paper's Section 5).
   2. Refits that structure on TRAIN+VAL (2015-2019) -- this is the "fit"
      segment of the plot, i.e. in-sample.
-  3. Evaluates the same fitted model, one-step-ahead and open-loop, on
-     TRAIN+VAL (in-sample) and on TEST (2022-2023, genuinely held out),
-     using forecast.py's own forecast_sequential -- the exact same
-     sequential rollout the paper's accuracy numbers come from.
+  3. Evaluates the same fitted model on TRAIN+VAL (in-sample) and on TEST
+     (2022-2023, genuinely held out) using forecast.py's own
+     forecast_sequential -- the same one-step-ahead, Kalman-corrected
+     rollout used everywhere else in the paper, just aggregated two
+     different ways (see step 4) instead of scored per province.
   4. Aligns every prediction back to its (year, week) and province, then
      averages actual and predicted incidence across all provinces for each
      (year, week) to get one national aggregate curve per split. This is
@@ -32,9 +33,9 @@ WHAT IT DOES:
      Both panels show actual vs. predicted mean incidence, with the R2 for
      each split annotated.
 
-This script does not touch the ablation/benchmark experiments already in
-results_report.txt -- it is purely a visualization of the already-reported
-final model's fit and forecast quality, at the aggregate level.
+This script does not touch the ablation/benchmark experiments reported
+elsewhere -- it is purely a visualization of the already-reported final
+model's fit and forecast quality, at the aggregate level.
 
 Usage:
     python3 plot_global_equation_performance.py
@@ -62,11 +63,8 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root:
 sys.path.insert(0, HERE)
 
 _stdout_before, _stderr_before = sys.stdout, sys.stderr
-try:
-    import forecast as F
-except ModuleNotFoundError:
-    import forecast_temporal_fix as F
-# forecast.py / forecast_temporal_fix.py redirects stdout/stderr to its own
+import forecast as F
+# forecast.py redirects stdout/stderr to its own
 # log file as a side effect of import; put ours back for this script's own
 # console output.
 sys.stdout, sys.stderr = _stdout_before, _stderr_before

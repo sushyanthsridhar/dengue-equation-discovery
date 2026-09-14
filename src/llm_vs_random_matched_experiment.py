@@ -1,9 +1,6 @@
 """
-REFEREE REPORT: Section 2.3 / 3.1 / 4.4 (Table 9) -- the decisive, matched
-LLM-vs-random-proposer experiment. This is the third of the referee's three
-"true submission blockers," and the only one not yet addressed
-computationally (the validation-split fix is done, the state-space write-up
-is a documentation task, not a computation).
+The decisive, matched LLM-vs-random-proposer experiment reported in
+Section 5.3 (Isolating the LLM's Contribution) and Table 9 of the paper.
 
 WHAT THIS DOES
 --------------
@@ -104,18 +101,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 _stdout_before, _stderr_before = sys.stdout, sys.stderr
-try:
-    import forecast as F
-except ModuleNotFoundError:
-    import forecast_temporal_fix as F
-# forecast.py / forecast_temporal_fix.py redirects stdout/stderr to its own
+import forecast as F
+# forecast.py redirects stdout/stderr to its own
 # log file as a side effect of import; put ours back for this script's own
 # console output.
 sys.stdout, sys.stderr = _stdout_before, _stderr_before
 
 print('[matched-experiment] imported', F.__name__)
 
-OUT_DIR = F.OUT_DIR
+OUT_DIR = os.path.join(os.path.dirname(HERE), 'results')  # NOT F.OUT_DIR ('outputs/'), which is unused/stale in this repo -- results/ is where every other output actually lives
 os.makedirs(OUT_DIR, exist_ok=True)
 
 N_SEEDS = 5
