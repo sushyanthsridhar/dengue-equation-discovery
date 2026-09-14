@@ -21,3 +21,8 @@ quality_scores.csv
 province_clusters.csv
 fsl_best.json
 fsl_history.csv
+
+!results/discover_equation_grid_results.csv
+
+Final_Repo/
+referee_report/

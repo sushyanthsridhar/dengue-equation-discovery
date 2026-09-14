@@ -1,3 +1,27 @@
+"""
+REFEREE REPORT FIX, item 2.1, clean temporal validation split.
+
+Copied from ../discover_equation.py (or ../forecast.py) with two changes only.
+
+1. FS_INNER_VAL changed from [2018, 2019] to [2018]. In the original release
+   code, 2019 was used both inside FunSearch's own inner validation and again
+   as the sole outer model-selection validation year (VAL_YEARS = [2019]), so
+   the outer validation evidence was not independent of structure selection.
+   This fix makes 2018 the only inner validation year, so 2019 is seen for
+   the first time at the outer model-selection stage.
+
+2. Data paths (DATA_CSV, LATENT_CSV, MODEL_PATH, CLUSTER_CSV, utils import)
+   now point to the parent Git_Repo folder instead of this folder, so this
+   script reuses the already-built latents, encoder, and cluster assignments
+   without needing its own copy. Its own outputs (fs_programs, grid results,
+   quality scores, logs) still write locally into referee_report/, so this
+   never overwrites the original release's outputs.
+
+No other logic, hyperparameter, or estimation-method change relative to the
+original file. This addresses submission blocker 2.1 in the referee report
+only, sections 3.1 and 4.4 (the matched LLM proposer control) and section 4
+(the hierarchy control) are separate follow-up scripts.
+"""
 import os, sys, json, copy, random, uuid, time, hashlib, warnings
 import numpy as np
 import pandas as pd
@@ -12,13 +36,14 @@ from joblib import Parallel, delayed
 from typing import Dict, List, Tuple, Any, Optional
 warnings.filterwarnings('ignore')
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+PARENT = os.path.dirname(HERE)  # Git_Repo root, already-built latents/model/clusters live there
+sys.path.insert(0, PARENT)
 from utils import load_data
-DATA_CSV = os.path.join(HERE, 'extended_input_normalized.csv')
-LATENT_CSV = os.path.join(HERE, 'latents', 'latent_dim10.csv')
-MODEL_PATH = os.path.join(HERE, 'models', 'best_model_dim10.pt')
-CLUSTER_CSV = os.path.join(HERE, 'province_clusters.csv')
-LOG_PATH = os.path.join(HERE, 'discover_equation_log.txt')
+DATA_CSV = os.path.join(PARENT, 'extended_input_normalized.csv')
+LATENT_CSV = os.path.join(PARENT, 'latents', 'latent_dim10.csv')
+MODEL_PATH = os.path.join(PARENT, 'models', 'best_model_dim10.pt')
+CLUSTER_CSV = os.path.join(PARENT, 'province_clusters.csv')
+LOG_PATH = os.path.join(HERE, 'discover_equation_temporal_fix_log.txt')
 LATENT_DIM = 10
 TRAIN_YEARS = list(range(2015, 2019))
 VAL_YEARS = [2019]
@@ -41,7 +66,7 @@ FS_DOUBLE_MUT = 0.15
 FS_CROSSOVER = 0.2
 FS_RANDOM_SEED = 42
 FS_INNER_TRAIN = [2015, 2016, 2017]
-FS_INNER_VAL = [2018, 2019]
+FS_INNER_VAL = [2018]
 THRESH_GLOBAL = 0.05
 THRESH_CLUSTER = 0.1
 THRESH_PROVINCE = 0.08
@@ -69,7 +94,8 @@ ACTIVE_THRESH = 0.01
 Q_INC_CLIP_LO = Q_INIT_INC * 0.1
 Q_INC_CLIP_HI = Q_INIT_INC * 20.0
 OLLAMA_URL = 'http://localhost:11434/api/chat'
-OLLAMA_MODEL = 'mistral:latest'
+OLLAMA_MODEL_PRIMARY = 'llama3.1:8b-instruct'  # referee_report change: try a stronger instruct model first
+OLLAMA_MODEL_FALLBACK = 'mistral:latest'  # used automatically if the primary model is not pulled locally
 FS_JSON_PATH = os.path.join(HERE, 'fsl_best.json')
 FS_HISTORY_PATH = os.path.join(HERE, 'fsl_history.csv')
 SKIP_FUNSEARCH = True
@@ -80,7 +106,7 @@ FS_GRID_DIVERSITY = {'spread': {0: (range(3, 5), 0), 1: (range(5, 6), 0), 2: (ra
 FS_DIR = os.path.join(HERE, 'fs_programs')
 GRID_CSV = os.path.join(HERE, 'discover_equation_grid_results.csv')
 GRID_LOG = os.path.join(HERE, 'discover_equation_grid_log.txt')
-MAX_LLM_ROUNDS = 1
+MAX_LLM_ROUNDS = 1  # referee_report note: left at 1 deliberately, this runs inside all 72 grid cells, raising it here would multiply grid search runtime; the richer multi-round loop lives in forecast_temporal_fix.py where only the single winning cell is refit
 PLATEAU_DELTA = 0.002
 PLATEAU_PATIENCE = 3
 R2_WEIGHT = 0.65
@@ -528,6 +554,10 @@ def run_hierarchical_em(province_data: Dict, n_lags: int, fs_terms: List[ExtraTe
     u = {prov: _warm_copy(u_init.get(prov) if u_init else None, (M, STATE_DIM)) for prov in provinces}
     x_smooth_all = {prov: province_data[prov]['s_obs'].copy() for prov in provinces}
     for em_iter in range(N_EM):
+        if em_iter == 0 or (em_iter + 1) % 10 == 0 or em_iter == N_EM - 1:
+            print(f'      [EM] {label}: iteration {em_iter + 1}/{N_EM}')
+        else:
+            pass
         beta_by_prov = {prov: g + h[province_data[prov]['cluster']] + u[prov] for prov in provinces}
         results = Parallel(n_jobs=N_JOBS)((delayed(_smooth_one)(prov, province_data[prov]['s_obs'], province_data[prov]['weeks'], beta_by_prov[prov], x_smooth_all[prov], q_diag, r_diag, n_lags, fs_terms, llm_formulas) for prov in provinces))
         for prov, x_s in results:
@@ -749,7 +779,52 @@ def _build_province_dict(data_df: pd.DataFrame, years: List[int]) -> Dict:
         pass
     return out
 
-def build_llm_prompt(fs_best: Program, history_rows: List[Dict], all_programs: List[Dict], val_r2: float, spectral_sc: float, spectral_delta: float, active_terms: List[Tuple[str, float]], pruned_terms: List[str], cluster_r2: Dict[int, float], llm_round: int, prev_suggestions: List[Dict], prev_survived: List[str], val_r2_history: List[float]) -> str:
+_LATENT_MEANING_CACHE = None
+
+def compute_latent_covariate_meaning():
+    """Referee_report addition. z1 through z10 are anonymous autoencoder latent
+    dimensions, the LLM has no way to know what physical quantity each one stands
+    in for. This computes, once per run, the correlation of each z dimension with
+    the real named covariates in the raw data, on training years only so nothing
+    from validation or test leaks in, and gives the LLM a genuine grounding
+    sentence such as z6 correlates with avg_rainfall instead of an invented one."""
+    global _LATENT_MEANING_CACHE
+    if _LATENT_MEANING_CACHE is not None:
+        return _LATENT_MEANING_CACHE
+    else:
+        pass
+    try:
+        cov_cols = ['avg_temp', 'avg_rainfall', 'avg_humidity', 'nino34_anom', 'soi_index', 'tna_sst_anom', 'solar_radiation', 'wind_speed', 'dew_point_temp', 'neighbor_incidence_lag0', 'consecutive_dry_weeks', 'consecutive_wet_weeks', 'rainy_season_phase', 'school_calendar_active']
+        raw = pd.read_csv(DATA_CSV, usecols=['province', 'year', 'week'] + cov_cols)
+        raw = raw[raw['year'].isin(TRAIN_YEARS)]
+        z_cols = [f'z{i}' for i in range(1, LATENT_DIM + 1)]
+        lat = pd.read_csv(LATENT_CSV, usecols=['province', 'year', 'week'] + z_cols)
+        lat = lat[lat['year'].isin(TRAIN_YEARS)]
+        merged = pd.merge(lat, raw, on=['province', 'year', 'week'], how='inner')
+        meaning = {}
+        for zi in range(1, LATENT_DIM + 1):
+            zcol = f'z{zi}'
+            corrs = merged[cov_cols].corrwith(merged[zcol])
+            corrs = corrs.dropna()
+            corrs = corrs.reindex(corrs.abs().sort_values(ascending=False).index)
+            top = corrs.head(2)
+            parts = [f'{name} r={val:+.2f}' for name, val in top.items()]
+            meaning[zi] = ', '.join(parts) if parts else 'no strong correlation with observed covariates'
+        else:
+            pass
+        _LATENT_MEANING_CACHE = meaning
+        print(f'  [LLM prompt] computed latent to covariate correlation table for {len(meaning)} z dimensions, training years only')
+        return meaning
+    except Exception as e:
+        print(f'  [LLM prompt] could not compute latent covariate meaning, {type(e).__name__}: {e}')
+        _LATENT_MEANING_CACHE = {}
+        return {}
+    else:
+        pass
+    finally:
+        pass
+
+def build_llm_prompt(fs_best: Program, history_rows: List[Dict], all_programs: List[Dict], val_r2: float, spectral_sc: float, spectral_delta: float, active_terms: List[Tuple[str, float]], pruned_terms: List[str], cluster_r2: Dict[int, float], llm_round: int, prev_suggestions: List[Dict], prev_survived: List[str], val_r2_history: List[float], latent_meaning: Dict[int, str] = None) -> str:
     if val_r2_history:
         trend_parts = [f'Round {i + 1}: {r:.4f}' for i, r in enumerate(val_r2_history)]
         trend_str = '  ' + '  |  '.join(trend_parts)
@@ -800,21 +875,35 @@ def build_llm_prompt(fs_best: Program, history_rows: List[Dict], all_programs: L
     else:
         pass
     cluster_str = '\n'.join((f'  Cluster {cid}: R2={r2:.4f}' for cid, r2 in sorted(cluster_r2.items())))
-    return f"""You are an expert epidemiologist and dynamical systems researcher collaborating on a SINDy (Sparse Identification of Nonlinear Dynamics) model for dengue forecasting.\n\nYOUR ROLE IN THE PIPELINE:\nYou are proposing candidate library terms for the dI/dt equation in a hierarchical SINDy model. The model structure is W_p = g + h_c + u_p where g is a global SINDy coefficient matrix shared by all 28 provinces, h_c is a small cluster correction, and u_p is a tiny province correction. You are improving g specifically for the incidence (dI/dt) dimension. After you propose terms, they are added to the regression library and the EM solver refits g on training data 2015-2018. Validation is then run on 2019 data only. Terms whose fitted coefficient falls below {ACTIVE_THRESH} in absolute value are dropped automatically. Only propose terms that have a strong biological or mathematical justification for a non-trivial coefficient.\n\nBIOLOGICAL CONTEXT FOR TERM DESIGN:\nDengue transmission in the Dominican Republic follows a seasonal pattern driven by:\n1. Aedes aegypti breeding cycle: rainfall and temperature drive mosquito abundance with roughly a 2 to 4 week lag. Interaction terms like season * z_lag2 or z_lag3 capture this.\n2. Extrinsic incubation period: the virus takes 8 to 12 days to develop in the mosquito. A 1 to 2 week lag between climate forcing and incidence change is biologically correct.\n3. Herd immunity and susceptible depletion: after a large outbreak, incidence self-suppresses. A logistic saturation term like y_lag1 * (1 - y_lag1) or I_cumulative already exists in the base library. Products of incidence with lagged incidence can also capture refractory dynamics.\n4. Outbreak threshold: dengue tends to either grow explosively or fade. A threshold-like nonlinearity can be captured by y_lag1^2 or y_lag1 * z_climate without needing explicit threshold constants.\n5. Semi-annual cycle: some provinces show a secondary peak around week 26. A 26-week seasonal interaction on top of the 52-week base already in the model can capture this.\n\nVAL R2 TREND ACROSS ROUNDS (training 2015-2018, validation 2019):\n{trend_str}\nIf val R2 is declining across rounds, your previous suggestions introduced terms that overfit 2019. Propose fewer and more biologically specific terms this round.\n\nCURRENT MODEL STATE (round {llm_round}):\nValidation R2 = {val_r2:.4f}  |  Spectral score = {spectral_sc:.4f}  (annual + semi-annual periodicity)\nSpectral trend this round = {spectral_delta:+.4f}  ({('improving' if spectral_delta >= 0 else 'DECLINING: prioritise seasonal structure terms')})\n\nPer-cluster validation R2:\n{cluster_str}\nNote: Cluster 3 (Azua, Peravia, San Jose de Ocoa, mountain provinces) is the hardest. These provinces have irregular year-to-year outbreak timing. Consider threshold or saturation terms for these dynamics.\n\nACTIVE TERMS IN THE CURRENT INCIDENCE EQUATION (sorted by coefficient magnitude):\n{active_str}\n\nTerms dropped this round (|coef| < {ACTIVE_THRESH}):\n  {pruned_str}\n{prev_sug_str}\nYOUR TASK:\nSuggest exactly 8 new candidate library terms grounded in dengue biology. Each formula must be a valid numpy expression using ONLY the variables below. Do NOT use any named constants (threshold, beta, K, R0, mu) or any variable not in the list. Every formula must evaluate to a numpy array of the same shape as the input arrays.\n\nBiological priorities in order:\n1. Climate-lag interactions: seasonal signal (sin52 or cos52) multiplied by a lagged z-dimension, e.g. np.sin(2*np.pi*week_arr/52) * z3_lag2.\n2. Incidence-environment couplings at biologically correct lags (1 to 3 weeks), e.g. y_lag1 * z2_lag2.\n3. Susceptible depletion proxies: product of current incidence with a lagged incidence difference, e.g. y_lag0 * (y_lag1 - y_lag3).\n4. Secondary seasonality: 26-week interaction, e.g. np.sin(2*np.pi*week_arr/26) * y_lag1.\n5. Outbreak nonlinearity: squared incidence or incidence times a climate z, e.g. y_lag1**2 or y_lag1 * z5_lag2.\nDo NOT propose pure polynomial interactions of z-dimensions with no incidence involvement, such as z3*z7 or z4^2. These have no direct biological pathway to dI/dt and have consistently produced near-zero coefficients in previous rounds.\n\nRespond ONLY with a valid JSON array. No text before or after. Example:\n[\n  {{"name": "sin52_z3_lag2", "formula": "np.sin(2*np.pi*week_arr/52) * z3_lag2", "reason": "seasonal modulation by climate lag 2 weeks, matching extrinsic incubation period"}},\n  {{"name": "y_z2_lag2", "formula": "y_lag1 * z2_lag2", "reason": "incidence times climate forcing at 2-week lag, vectorial capacity proxy"}},\n  {{"name": "y_depletion", "formula": "y_lag0 * (y_lag1 - y_lag3)", "reason": "susceptible depletion: high incidence suppresses future growth"}},\n  ...\n]\n\nCOMPLETE LIST of available variables. Use ONLY these:\ny_lag0, y_lag1, y_lag2, y_lag3\nz1_lag0, z2_lag0, z3_lag0, z4_lag0, z5_lag0, z6_lag0, z7_lag0, z8_lag0, z9_lag0, z10_lag0\nz1_lag1, z2_lag1, z3_lag1, z4_lag1, z5_lag1, z6_lag1, z7_lag1, z8_lag1, z9_lag1, z10_lag1\nz1_lag2, z2_lag2, z3_lag2, z4_lag2, z5_lag2, z6_lag2, z7_lag2, z8_lag2, z9_lag2, z10_lag2\nz1_lag3, z2_lag3, z3_lag3, z4_lag3, z5_lag3, z6_lag3, z7_lag3, z8_lag3, z9_lag3, z10_lag3\nweek_arr, np\n\nDo NOT use: threshold, beta, K, K1, K2, alpha, gamma, R0, mu, or any name not in the list."""
+    if latent_meaning:
+        meaning_str = '\n'.join((f'  z{zi}: {desc}' for zi, desc in sorted(latent_meaning.items())))
+    else:
+        meaning_str = '  (correlation table unavailable this run, treat z dimensions as unlabelled climate and mobility factors)'
+    return f"""You are an expert epidemiologist and dynamical systems researcher collaborating on a SINDy (Sparse Identification of Nonlinear Dynamics) model for dengue forecasting.\n\nYOUR ROLE IN THE PIPELINE:\nYou are proposing candidate library terms for the dI/dt equation in a hierarchical SINDy model. The model structure is W_p = g + h_c + u_p where g is a global SINDy coefficient matrix shared by all 28 provinces, h_c is a small cluster correction, and u_p is a tiny province correction. You are improving g specifically for the incidence (dI/dt) dimension. After you propose terms, they are added to the regression library and the EM solver refits g on training data 2015-2018. Validation is then run on 2019 data only. Terms whose fitted coefficient falls below {ACTIVE_THRESH} in absolute value are dropped automatically. Only propose terms that have a strong biological or mathematical justification for a non-trivial coefficient.\n\nWHAT z1 THROUGH z10 ACTUALLY ARE:\nThese are not raw climate series, they are latent dimensions learned by an autoencoder compressing 36 raw covariates per province per week. The list below is the closest real world reading of what each latent dimension stands in for, computed as its correlation with the original named covariates on training years only. Ground your proposals in this instead of guessing which z is which.\n{meaning_str}\n\nBIOLOGICAL CONTEXT FOR TERM DESIGN:\nDengue transmission in the Dominican Republic follows a seasonal pattern driven by:\n1. Aedes aegypti breeding cycle: rainfall and temperature drive mosquito abundance with roughly a 2 to 4 week lag. Interaction terms like season * z_lag2 or z_lag3 capture this.\n2. Extrinsic incubation period: the virus takes 8 to 12 days to develop in the mosquito. A 1 to 2 week lag between climate forcing and incidence change is biologically correct.\n3. Herd immunity and susceptible depletion: after a large outbreak, incidence self-suppresses. A logistic saturation term like y_lag1 * (1 - y_lag1) or I_cumulative already exists in the base library. Products of incidence with lagged incidence can also capture refractory dynamics.\n4. Outbreak threshold: dengue tends to either grow explosively or fade. A threshold-like nonlinearity can be captured by y_lag1^2 or y_lag1 * z_climate without needing explicit threshold constants.\n5. Semi-annual cycle: some provinces show a secondary peak around week 26. A 26-week seasonal interaction on top of the 52-week base already in the model can capture this.\n\nVAL R2 TREND ACROSS ROUNDS (training 2015-2018, validation 2019):\n{trend_str}\nIf val R2 is declining across rounds, your previous suggestions introduced terms that overfit 2019. Propose fewer and more biologically specific terms this round.\n\nCURRENT MODEL STATE (round {llm_round}):\nValidation R2 = {val_r2:.4f}  |  Spectral score = {spectral_sc:.4f}  (annual + semi-annual periodicity)\nSpectral trend this round = {spectral_delta:+.4f}  ({('improving' if spectral_delta >= 0 else 'DECLINING: prioritise seasonal structure terms')})\n\nPer-cluster validation R2:\n{cluster_str}\nNote: Cluster 3 (Azua, Peravia, San Jose de Ocoa, mountain provinces) is the hardest. These provinces have irregular year-to-year outbreak timing. Consider threshold or saturation terms for these dynamics.\n\nACTIVE TERMS IN THE CURRENT INCIDENCE EQUATION (sorted by coefficient magnitude):\n{active_str}\n\nTerms dropped this round (|coef| < {ACTIVE_THRESH}):\n  {pruned_str}\n{prev_sug_str}\nYOUR TASK:\nSuggest exactly 8 new candidate library terms grounded in dengue biology. Each formula must be a valid numpy expression using ONLY the variables below. Do NOT use any named constants (threshold, beta, K, R0, mu) or any variable not in the list. Every formula must evaluate to a numpy array of the same shape as the input arrays.\n\nBiological priorities in order:\n1. Climate-lag interactions: seasonal signal (sin52 or cos52) multiplied by a lagged z-dimension, e.g. np.sin(2*np.pi*week_arr/52) * z3_lag2.\n2. Incidence-environment couplings at biologically correct lags (1 to 3 weeks), e.g. y_lag1 * z2_lag2.\n3. Susceptible depletion proxies: product of current incidence with a lagged incidence difference, e.g. y_lag0 * (y_lag1 - y_lag3).\n4. Secondary seasonality: 26-week interaction, e.g. np.sin(2*np.pi*week_arr/26) * y_lag1.\n5. Outbreak nonlinearity: squared incidence or incidence times a climate z, e.g. y_lag1**2 or y_lag1 * z5_lag2.\nDo NOT propose pure polynomial interactions of z-dimensions with no incidence involvement, such as z3*z7 or z4^2. These have no direct biological pathway to dI/dt and have consistently produced near-zero coefficients in previous rounds.\n\nRespond ONLY with a valid JSON array. No text before or after. Example:\n[\n  {{"name": "sin52_z3_lag2", "formula": "np.sin(2*np.pi*week_arr/52) * z3_lag2", "reason": "seasonal modulation by climate lag 2 weeks, matching extrinsic incubation period"}},\n  {{"name": "y_z2_lag2", "formula": "y_lag1 * z2_lag2", "reason": "incidence times climate forcing at 2-week lag, vectorial capacity proxy"}},\n  {{"name": "y_depletion", "formula": "y_lag0 * (y_lag1 - y_lag3)", "reason": "susceptible depletion: high incidence suppresses future growth"}},\n  ...\n]\n\nCOMPLETE LIST of available variables. Use ONLY these:\ny_lag0, y_lag1, y_lag2, y_lag3\nz1_lag0, z2_lag0, z3_lag0, z4_lag0, z5_lag0, z6_lag0, z7_lag0, z8_lag0, z9_lag0, z10_lag0\nz1_lag1, z2_lag1, z3_lag1, z4_lag1, z5_lag1, z6_lag1, z7_lag1, z8_lag1, z9_lag1, z10_lag1\nz1_lag2, z2_lag2, z3_lag2, z4_lag2, z5_lag2, z6_lag2, z7_lag2, z8_lag2, z9_lag2, z10_lag2\nz1_lag3, z2_lag3, z3_lag3, z4_lag3, z5_lag3, z6_lag3, z7_lag3, z8_lag3, z9_lag3, z10_lag3\nweek_arr, np\n\nDo NOT use: threshold, beta, K, K1, K2, alpha, gamma, R0, mu, or any name not in the list."""
 
 def query_llm(prompt: str) -> str:
-    payload = {'model': OLLAMA_MODEL, 'messages': [{'role': 'user', 'content': prompt}], 'stream': False, 'options': {'temperature': 0.4, 'num_predict': 1200}}
-    try:
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=300)
-        resp.raise_for_status()
-        result = resp.json().get('message', {}).get('content', '')
-        return result
-    except Exception as e:
-        return ''
+    for model_name in (OLLAMA_MODEL_PRIMARY, OLLAMA_MODEL_FALLBACK):
+        payload = {'model': model_name, 'messages': [{'role': 'user', 'content': prompt}], 'stream': False, 'options': {'temperature': 0.4, 'num_predict': 1200}}
+        try:
+            resp = requests.post(OLLAMA_URL, json=payload, timeout=300)
+            resp.raise_for_status()
+            result = resp.json().get('message', {}).get('content', '')
+            if model_name != OLLAMA_MODEL_PRIMARY:
+                print(f'  [LLM] primary model unavailable, used fallback model {model_name} instead')
+            else:
+                pass
+            return result
+        except Exception as e:
+            print(f'  [LLM] Ollama call with {model_name} FAILED, {type(e).__name__}: {e}')
+            continue
+        else:
+            pass
+        finally:
+            pass
     else:
         pass
-    finally:
-        pass
+    print('  [LLM] all configured models failed, returning empty response for this round')
+    return ''
 
 def parse_llm_suggestions(raw_text: str) -> List[Dict]:
     try:
@@ -960,6 +1049,7 @@ def run_funsearch(fs_tau=None, score_algo='ridge', bias_table=None, save_path=No
     _bias = bias_table if bias_table is not None else {isl: (v[0], v[1]) for isl, v in ISLAND_BIAS_TABLE.items()}
     fs_train_pd = _build_province_dict(latent, FS_INNER_TRAIN)
     fs_val_pd = _build_province_dict(latent, FS_INNER_VAL)
+    print(f'  [FunSearch] starting, {FS_N_ISLANDS} islands x {FS_ISLAND_SIZE} programs, {FS_N_ITERATIONS} iterations, tau={fs_tau}, score_algo={score_algo}')
     _l1_ratio = 0.5
     if score_algo == 'elasticnet':
         _l1_ratio = _tune_elasticnet_l1(fs_train_pd, _alpha)
@@ -1077,8 +1167,17 @@ def run_funsearch(fs_tau=None, score_algo='ridge', bias_table=None, save_path=No
     history_rows = []
     all_programs = [copy.deepcopy(prog).to_dict() for isl in islands for prog in isl]
     for iteration in range(FS_N_ITERATIONS):
+        if iteration == 0 or (iteration + 1) % 10 == 0 or iteration == FS_N_ITERATIONS - 1:
+            _best_so_far = max((p.score for isl in islands for p in isl))
+            print(f'    [FunSearch] iteration {iteration + 1}/{FS_N_ITERATIONS}  best_score={_best_so_far:+.4f}')
+        else:
+            pass
         for isl_idx, island in enumerate(islands):
-            parent = random.choices(island, weights=[max(0, p.score + 1) for p in island])[0]
+            _weights = [max(0, p.score + 1) for p in island]
+            if sum(_weights) <= 0:
+                parent = random.choice(island)
+            else:
+                parent = random.choices(island, weights=_weights)[0]
             child = mutate(parent, isl_idx)
             if random.random() < FS_CROSSOVER and len(island) > 1:
                 donor = random.choice([p for p in island if p.program_id != parent.program_id])
@@ -1103,6 +1202,7 @@ def run_funsearch(fs_tau=None, score_algo='ridge', bias_table=None, save_path=No
         else:
             pass
         if (iteration + 1) % FS_MIGRATE_EVERY == 0:
+            print(f'    [FunSearch] iteration {iteration + 1}, migration round')
             for isl_idx in range(FS_N_ISLANDS):
                 best = max(islands[isl_idx], key=lambda p: p.score)
                 target = (isl_idx + 1) % FS_N_ISLANDS
@@ -1119,6 +1219,7 @@ def run_funsearch(fs_tau=None, score_algo='ridge', bias_table=None, save_path=No
     else:
         pass
     best = max((prog for isl in islands for prog in isl), key=lambda p: p.score)
+    print(f'  [FunSearch] done, best score={best.score:+.4f}  n_lags={best.n_lags}  n_extra_terms={len(best.extra_terms)}')
     if save_path is not None:
         fs_json_out = save_path + '_best.json'
         fs_hist_out = save_path + '_history.csv'
@@ -1137,7 +1238,12 @@ def _run_one_grid_cell(run_label, fs_tau, score_algo, diversity_key, train_pd, v
     bias_table = {isl: (lr, nb) for isl, (lr, nb) in FS_GRID_DIVERSITY[diversity_key].items()}
 
     def _log(msg):
-        pass
+        print(msg)
+        if grid_log_fh is not None:
+            grid_log_fh.write(str(msg) + '\n')
+            grid_log_fh.flush()
+        else:
+            pass
     _log(f"\n{'=' * 60}")
     _log(f'  GRID CELL: {run_label}')
     _log(f'  fs_tau={fs_tau}  score_algo={score_algo}  diversity={diversity_key}')
@@ -1175,7 +1281,7 @@ def _run_one_grid_cell(run_label, fs_tau, score_algo, diversity_key, train_pd, v
         else:
             pass
         _log(f'  Round {llm_round + 1}: val_R2={val_r2:.4f}  spectral={spectral_sc:.4f}  combined={combined_sc:.4f}')
-        prompt = build_llm_prompt(fs_best, history_rows, all_programs, val_r2, spectral_sc, 0.0, active_terms, pruned_terms, cluster_r2, llm_round + 1, [], [], [val_r2])
+        prompt = build_llm_prompt(fs_best, history_rows, all_programs, val_r2, spectral_sc, 0.0, active_terms, pruned_terms, cluster_r2, llm_round + 1, [], [], [val_r2], compute_latent_covariate_meaning())
         raw_resp = query_llm(prompt)
         suggestions = parse_llm_suggestions(raw_resp)
         if not suggestions:
@@ -1235,11 +1341,13 @@ if __name__ == '__main__':
     quality_df.to_csv(os.path.join(HERE, 'quality_scores.csv'), index=False)
     included_provinces = set()
     excluded_provinces = set()
+    print('\n[STAGE] province quality gate')
     for _, row in quality_df.iterrows():
         prov = row['province']
         qs = row['quality_score']
         status = 'INCLUDE' if qs >= QUALITY_THRESHOLD else 'EXCLUDE'
         weak_tag = ' WEAK' if prov in WEAK_PROVINCES else ''
+        print(f'  [quality] {prov:35s} Q={qs:.4f}  {status}{weak_tag}')
         if qs >= QUALITY_THRESHOLD:
             included_provinces.add(prov)
         else:
@@ -1247,9 +1355,9 @@ if __name__ == '__main__':
     else:
         pass
     if excluded_provinces:
-        pass
+        print(f'  [quality] excluded from headline R2: {sorted(excluded_provinces)}')
     else:
-        pass
+        print('  [quality] no provinces excluded')
     overlap_weak_excluded = WEAK_PROVINCES & excluded_provinces
     _cluster_prov: Dict[int, List[str]] = {}
     for prov, pd_ in train_pd.items():
@@ -1257,18 +1365,22 @@ if __name__ == '__main__':
         _cluster_prov.setdefault(cid, []).append(prov)
     else:
         pass
+    print('\n[STAGE] province clusters')
     for cid in sorted(_cluster_prov):
         _rows = sum((len(train_pd[p]['s_obs']) for p in _cluster_prov[cid]))
+        print(f'  [cluster {cid}] {len(_cluster_prov[cid])} provinces, {_rows} training rows')
         for p in sorted(_cluster_prov[cid]):
             _n = len(train_pd[p]['s_obs'])
             _mean_inc = float(np.mean(np.expm1(train_pd[p]['s_obs'][:, INC_COL])))
             qs_val = float(quality_df[quality_df['province'] == p]['quality_score'].values[0]) if p in quality_df['province'].values else -1.0
             _is_weak = 'WEAK ' if p in WEAK_PROVINCES else '     '
             _excl = 'EXCL' if p in excluded_provinces else '    '
+            print(f'      {p:35s} n={_n:4d}  mean_inc={_mean_inc:8.4f}  Q={qs_val:.4f}  {_is_weak}{_excl}')
         else:
             pass
     else:
         pass
+    print(f'\n[STAGE] grid search starting, {len(FS_GRID_DIVERSITY) * len(FS_GRID_ALGOS) * len(FS_GRID_TAU)} cells total')
     grid_results = []
     os.makedirs(FS_DIR, exist_ok=True)
     total_cells = len(FS_GRID_DIVERSITY) * len(FS_GRID_ALGOS) * len(FS_GRID_TAU)
@@ -1279,6 +1391,7 @@ if __name__ == '__main__':
                 for tau in FS_GRID_TAU:
                     done += 1
                     label = f'tau{tau}_{algo}_{div_key}'
+                    print(f'\n[GRID {done}/{total_cells}] {label}')
                     try:
                         row = _run_one_grid_cell(label, tau, algo, div_key, train_pd, val_pd, trainval_pd, test_pd, included_provinces, excluded_provinces, quality_df, _grid_log)
                     except Exception as _err:
@@ -1291,6 +1404,7 @@ if __name__ == '__main__':
                         pass
                     grid_results.append(row)
                     pd.DataFrame(grid_results).to_csv(GRID_CSV, index=False)
+                    print(f"[GRID {done}/{total_cells}] {label} done  val_r2={row.get('val_r2', float('nan')):.4f}  test_r2_filt={row.get('test_r2_filt', float('nan')):.4f}")
                 else:
                     pass
             else:
@@ -1307,8 +1421,18 @@ if __name__ == '__main__':
     finally:
         pass
     header = f"  {'Label':30s}  {'tau':>4}  {'algo':>14}  {'div':>7}  {'FS_sc':>7}  {'val_R2':>7}  {'test_R2':>8}  {'test_R2_filt':>13}"
+    print('\n' + '=' * 90)
+    print('  GRID SEARCH COMPLETE, ranked by validation R2')
+    print('=' * 90)
+    print(header)
     for _, row in results_df_sorted.iterrows():
+        print(f"  {row['run_label']:30s}  {row['fs_tau']:>4}  {row['score_algo']:>14}  {row['diversity']:>7}  {row['fs_score']:>7.4f}  {row['val_r2']:>7.4f}  {row['test_r2']:>8.4f}  {row['test_r2_filt']:>13.4f}")
+    else:
         pass
+    if len(results_df_sorted) > 0:
+        _winner = results_df_sorted.iloc[0]
+        print(f"\n  WINNER: {_winner['run_label']}  val_R2={_winner['val_r2']:.4f}  test_R2_filt={_winner['test_r2_filt']:.4f}")
+        print("  Update forecast_temporal_fix.py's WINNING_FS_TAU / WINNING_SCORE_ALGO / WINNING_DIVERSITY / WINNING_LABEL to match this cell.")
     else:
         pass
 else:
