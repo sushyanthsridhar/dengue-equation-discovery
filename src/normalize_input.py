@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
 EXTENDED_CSV = os.path.join(HERE, "extended_input.csv")
 OUTPUT_CSV = os.path.join(HERE, "extended_input_normalized.csv")
 

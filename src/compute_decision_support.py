@@ -44,7 +44,7 @@ try:
 except ImportError:
     import forecast_temporal_fix as F
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
 OUT_DIR = os.path.join(HERE, 'results')
 os.makedirs(OUT_DIR, exist_ok=True)
 

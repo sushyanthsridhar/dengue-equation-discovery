@@ -8,7 +8,7 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
 LATENT_CSV = os.path.join(HERE, 'latents', 'latent_dim10.csv')
 PLOTS_DIR = os.path.join(HERE, 'plots')
 OUT_CSV = os.path.join(HERE, 'province_clusters.csv')

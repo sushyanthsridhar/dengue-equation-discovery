@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import optuna
 from optuna.samplers import TPESampler
 from utils import load_data
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
 DATA_CSV = os.path.join(HERE, 'extended_input_normalized.csv')
 TRAIN_YEARS = list(range(2015, 2019))
 VAL_YEARS = [2019]

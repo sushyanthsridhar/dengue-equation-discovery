@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from utils import load_data
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
 DATA_CSV = os.path.join(HERE, 'extended_input_normalized.csv')
 CFG_PATH = os.path.join(HERE, 'best_config_autoencoder.txt')
 MODELS_DIR = os.path.join(HERE, 'models')

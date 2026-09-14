@@ -1,26 +1,10 @@
 """
-REFEREE REPORT FIX, item 2.1, clean temporal validation split.
-
-Copied from ../discover_equation.py (or ../forecast.py) with two changes only.
-
-1. FS_INNER_VAL changed from [2018, 2019] to [2018]. In the original release
-   code, 2019 was used both inside FunSearch's own inner validation and again
-   as the sole outer model-selection validation year (VAL_YEARS = [2019]), so
-   the outer validation evidence was not independent of structure selection.
-   This fix makes 2018 the only inner validation year, so 2019 is seen for
-   the first time at the outer model-selection stage.
-
-2. Data paths (DATA_CSV, LATENT_CSV, MODEL_PATH, CLUSTER_CSV, utils import)
-   now point to the parent Git_Repo folder instead of this folder, so this
-   script reuses the already-built latents, encoder, and cluster assignments
-   without needing its own copy. Its own outputs (fs_programs, grid results,
-   quality scores, logs) still write locally into referee_report/, so this
-   never overwrites the original release's outputs.
-
-No other logic, hyperparameter, or estimation-method change relative to the
-original file. This addresses submission blocker 2.1 in the referee report
-only, sections 3.1 and 4.4 (the matched LLM proposer control) and section 4
-(the hierarchy control) are separate follow-up scripts.
+FunSearch's inner validation year (2018) is kept strictly separate from the
+outer model-selection validation year (2019): 2019 is seen for the first
+time only at the outer model-selection stage, never inside the FunSearch
+search itself, so the outer validation evidence is independent of the term
+structure the search already chose. See Section 4 (LLM-Guided Sparse
+Dynamics Discovery) and Table 4 (year ranges per stage) in the paper.
 """
 import os, sys, json, copy, random, uuid, time, hashlib, warnings, math
 import numpy as np
@@ -35,8 +19,8 @@ from sklearn.metrics import r2_score
 from joblib import Parallel, delayed
 from typing import Dict, List, Tuple, Any, Optional
 warnings.filterwarnings('ignore')
-HERE = os.path.dirname(os.path.abspath(__file__))
-PARENT = os.path.dirname(HERE)  # Git_Repo root, already-built latents/model/clusters live there
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
+PARENT = HERE  # repo root; HERE already resolved two levels up from src/, so PARENT is the same location
 sys.path.insert(0, PARENT)
 from utils import load_data
 DATA_CSV = os.path.join(PARENT, 'extended_input_normalized.csv')

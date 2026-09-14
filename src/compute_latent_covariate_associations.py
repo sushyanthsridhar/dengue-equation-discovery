@@ -25,6 +25,8 @@ Writes:
     results/latent_covariate_associations.csv -- one row per (z, covariate,
         Pearson r), top 3 covariates by |r| for each of z4, z6, z7, z9.
 """
+import os
+
 import pandas as pd
 
 import forecast as fc  # noqa: E402  (importing runs forecast.py's module-level data/setup code)
@@ -51,6 +53,7 @@ if __name__ == '__main__':
             rows.append({'z': zcol, 'rank': rank, 'covariate': name, 'pearson_r': round(float(val), 4)})
 
     df = pd.DataFrame(rows)
-    df.to_csv('results/latent_covariate_associations.csv', index=False)
+    OUT_PATH = os.path.join(fc.HERE, 'results', 'latent_covariate_associations.csv')  # fc.HERE resolves to the repo root regardless of cwd
+    df.to_csv(OUT_PATH, index=False)
     print(df.to_string(index=False))
-    print("\nWrote results/latent_covariate_associations.csv")
+    print(f"\nWrote {OUT_PATH}")

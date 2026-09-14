@@ -52,7 +52,7 @@ from sklearn.metrics import r2_score
 
 import forecast  # noqa: E402  (importing runs forecast.py's module-level data/setup code)
 
-HERE = __import__('os').path.dirname(__import__('os').path.abspath(__file__))
+HERE = __import__('os').path.dirname(__import__('os').path.dirname(__import__('os').path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
 OUT_DIR = __import__('os').path.join(HERE, 'results')  # matches where every other results/*.csv already lives, NOT forecast.OUT_DIR ('outputs/'), which is unused/stale in this repo
 __import__('os').makedirs(OUT_DIR, exist_ok=True)
 N_RUNS = forecast.N_STABILITY_RUNS

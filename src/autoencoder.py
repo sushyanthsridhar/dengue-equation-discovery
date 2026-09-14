@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import optuna
 from optuna.samplers import TPESampler
 from utils import load_data
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
 DATA_CSV = os.path.join(HERE, 'extended_input_normalized.csv')
 MODELS_DIR = os.path.join(HERE, 'models')
 LATENT_DIR = os.path.join(HERE, 'latents')
