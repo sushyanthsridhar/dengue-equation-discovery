@@ -1,0 +1,3 @@
+Provinces,ROC-AUC,Outbreak anchors,Non-outbreak anchors
+All 28,0.835,177,383
+Quality-gated 26,0.828,148,372

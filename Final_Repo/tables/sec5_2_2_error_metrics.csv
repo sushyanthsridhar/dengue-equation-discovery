@@ -1,0 +1,5 @@
+Aggregation,MAE,RMSE,nRMSE
+"Pooled, all 28 provinces",0.0355 ± 0.0003,0.0699 ± 0.0010,1.136 ± 0.016
+"Pooled, quality-gated 26 provinces",0.0328 ± 0.0003,0.0654 ± 0.0011,1.145 ± 0.019
+"Mean-per-province, all 28 provinces",0.0355 ± 0.0003,0.0616 ± 0.0010,1.037 ± 0.017
+"Mean-per-province, quality-gated 26 provinces",0.0328 ± 0.0003,0.0576 ± 0.0011,1.042 ± 0.018

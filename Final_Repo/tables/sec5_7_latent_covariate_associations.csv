@@ -1,0 +1,13 @@
+Latent,Covariate,r
+z4,rainy season phase,-0.522
+z4,average temperature,-0.342
+z4,consecutive wet weeks,0.318
+z6,average temperature,-0.763
+z6,neighboring-province incidence,-0.403
+z6,rainy season phase,-0.338
+z7,rainy season phase,-0.754
+z7,dew point temperature,-0.472
+z7,average humidity,-0.446
+z9,school calendar active,-0.504
+z9,neighboring-province incidence,-0.492
+z9,rainy season phase,-0.477
