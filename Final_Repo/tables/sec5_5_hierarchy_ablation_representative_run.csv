@@ -1,5 +1,0 @@
-Variant,Validation_R2,Test_R2,Test_R2_quality_filtered
-"Global only (no cluster, no province)",0.4874,0.4072,0.4239
-Global + cluster,0.4971,0.4181,0.4337
-Global + province,0.5418,0.4426,0.4517
-Full (global + cluster + province),0.5456,0.4359,0.4445

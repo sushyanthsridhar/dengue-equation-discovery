@@ -1,1 +1,0 @@
-Turns one fitted equation into the public-health outputs reported in the paper: an 8-week-ahead outbreak probability per province, a HIGH/MEDIUM/LOW reliability flag combining data quality with test accuracy, a province risk ranking by recent anomaly z-score, and alert precision swept across probability cutoffs.

@@ -1,1 +1,0 @@
-Clusters the 32 provinces by their mean latent state, k means run for k from 2 to 8 with 20 initialisations each, selecting k equals 5 by silhouette score.

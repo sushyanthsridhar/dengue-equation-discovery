@@ -1,8 +1,0 @@
-Quantity,Minimum,Median,Maximum
-Mean weekly incidence per 100k,0.83,1.83,4.83
-Circular peak week,18.6,39.3,44.5
-Seasonal concentration,0.098,0.351,0.655
-National-shape fit R2,0.004,0.675,0.936
-Correlation with temperature,+0.001,+0.262,+0.413
-Correlation with rainfall,-0.195,-0.037,+0.081
-Correlation with humidity,-0.212,+0.026,+0.197

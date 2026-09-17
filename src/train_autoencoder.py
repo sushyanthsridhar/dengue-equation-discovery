@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from utils import load_data
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
+HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_CSV = os.path.join(HERE, 'extended_input_normalized.csv')
 CFG_PATH = os.path.join(HERE, 'best_config_autoencoder.txt')
 MODELS_DIR = os.path.join(HERE, 'models')
@@ -17,8 +17,8 @@ LATENT_DIR = os.path.join(HERE, 'latents')
 PLOTS_DIR = os.path.join(HERE, 'plots')
 for d in [MODELS_DIR, LATENT_DIR, PLOTS_DIR]:
     os.makedirs(d, exist_ok=True)
-TRAIN_YEARS = list(range(2015, 2019))
-VAL_YEARS = [2019]
+TRAIN_YEARS = list(range(2015, 2020))
+VAL_YEARS = [2020, 2021]
 EPOCHS = 500
 PATIENCE = 80
 
@@ -29,7 +29,7 @@ def load_config(path):
             line = line.strip()
             if not line or line.startswith('val_mse') or line.startswith('val_r2'):
                 continue
-            k, v = line.split('=', 1)
+            (k, v) = line.split('=', 1)
             cfg[k.strip()] = v.strip()
     return cfg
 ACTS = {'relu': nn.ReLU, 'leakyrelu': nn.LeakyReLU, 'elu': nn.ELU}
@@ -76,7 +76,7 @@ WEIGHT_DECAY = float(cfg['weight_decay'])
 BATCH_SIZE = int(cfg['batch_size'])
 ACTIVATION = cfg['activation']
 USE_BATCHNORM = cfg['use_batchnorm'] == 'True'
-raw, INPUT_FEATURES = load_data(DATA_CSV, TRAIN_YEARS)
+(raw, INPUT_FEATURES) = load_data(DATA_CSV, TRAIN_YEARS)
 INPUT_DIM = len(INPUT_FEATURES)
 train_mask = raw['year'].isin(TRAIN_YEARS)
 val_mask = raw['year'].isin(VAL_YEARS)
@@ -87,7 +87,7 @@ meta_trainval = raw.loc[trainval_mask, ['province', 'year', 'week']].reset_index
 meta_trainval['split'] = meta_trainval['year'].apply(lambda y: 'train' if y in TRAIN_YEARS else 'val')
 INCIDENCE_WEIGHT = 5.0
 feat_weights = torch.ones(INPUT_DIM)
-for i, f in enumerate(INPUT_FEATURES):
+for (i, f) in enumerate(INPUT_FEATURES):
     if 'incidence' in f or 'inc_momentum' in f:
         feat_weights[i] = INCIDENCE_WEIGHT
 
@@ -105,7 +105,7 @@ n_params = sum((p.numel() for p in model.parameters()))
 for epoch in range(1, EPOCHS + 1):
     model.train()
     batch_losses = []
-    for xb, _ in trainval_loader:
+    for (xb, _) in trainval_loader:
         optimizer.zero_grad()
         loss = weighted_mse(model(xb), xb)
         loss.backward()
@@ -142,7 +142,7 @@ latent_df['week'] = meta_trainval['week'].values
 latent_df['split'] = meta_trainval['split'].values
 latent_path = os.path.join(LATENT_DIR, f'latent_dim{LATENT_DIM}.csv')
 latent_df.to_csv(latent_path, index=False)
-fig, ax = plt.subplots(figsize=(8, 4))
+(fig, ax) = plt.subplots(figsize=(8, 4))
 ax.plot(train_losses, label='Train+Val')
 ax.set_xlabel('Epoch')
 ax.set_ylabel('MSE Loss')
@@ -158,10 +158,10 @@ if pairs:
     ncols = min(3, len(pairs))
     nrows = (len(pairs) + ncols - 1) // ncols
     years = sorted(latent_df['year'].unique())
-    yc = {y: plt.cm.plasma(i / max(len(years) - 1, 1)) for i, y in enumerate(years)}
-    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows))
+    yc = {y: plt.cm.plasma(i / max(len(years) - 1, 1)) for (i, y) in enumerate(years)}
+    (fig, axes) = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows))
     axes = np.array(axes).flatten() if len(pairs) > 1 else [axes]
-    for idx, (za, zb) in enumerate(pairs):
+    for (idx, (za, zb)) in enumerate(pairs):
         ax = axes[idx]
         for yr in years:
             m = latent_df['year'] == yr

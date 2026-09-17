@@ -1,11 +1,3 @@
-"""
-FunSearch's inner validation year (2018) is kept strictly separate from the
-outer model-selection validation year (2019): 2019 is seen for the first
-time only at the outer model-selection stage, never inside the FunSearch
-search itself, so the outer validation evidence is independent of the term
-structure the search already chose. See Section 4 (LLM-Guided Sparse
-Dynamics Discovery) and Table 4 (year ranges per stage) in the paper.
-"""
 import os, sys, json, copy, random, uuid, time, hashlib, warnings
 import numpy as np
 import pandas as pd
@@ -19,15 +11,15 @@ from sklearn.metrics import r2_score
 from joblib import Parallel, delayed
 from typing import Dict, List, Tuple, Any, Optional
 warnings.filterwarnings('ignore')
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
-PARENT = HERE  # repo root; HERE already resolved two levels up from src/, so PARENT is the same location
+HERE = os.path.dirname(os.path.abspath(__file__))
+PARENT = os.path.dirname(HERE)
 sys.path.insert(0, PARENT)
 from utils import load_data
 DATA_CSV = os.path.join(PARENT, 'extended_input_normalized.csv')
 LATENT_CSV = os.path.join(PARENT, 'latents', 'latent_dim10.csv')
 MODEL_PATH = os.path.join(PARENT, 'models', 'best_model_dim10.pt')
 CLUSTER_CSV = os.path.join(PARENT, 'province_clusters.csv')
-LOG_PATH = os.path.join(HERE, 'discover_equation_log.txt')
+LOG_PATH = os.path.join(HERE, 'discover_equation_temporal_fix_log.txt')
 LATENT_DIM = 10
 TRAIN_YEARS = list(range(2015, 2019))
 VAL_YEARS = [2019]
@@ -78,8 +70,8 @@ ACTIVE_THRESH = 0.01
 Q_INC_CLIP_LO = Q_INIT_INC * 0.1
 Q_INC_CLIP_HI = Q_INIT_INC * 20.0
 OLLAMA_URL = 'http://localhost:11434/api/chat'
-OLLAMA_MODEL_PRIMARY = 'llama3.1:8b-instruct'  # preferred model; falls back to mistral:latest if unavailable via Ollama
-OLLAMA_MODEL_FALLBACK = 'mistral:latest'  # used automatically if the primary model is not pulled locally
+OLLAMA_MODEL_PRIMARY = 'llama3.1:8b-instruct'
+OLLAMA_MODEL_FALLBACK = 'mistral:latest'
 FS_JSON_PATH = os.path.join(HERE, 'fsl_best.json')
 FS_HISTORY_PATH = os.path.join(HERE, 'fsl_history.csv')
 SKIP_FUNSEARCH = True
@@ -90,7 +82,7 @@ FS_GRID_DIVERSITY = {'spread': {0: (range(3, 5), 0), 1: (range(5, 6), 0), 2: (ra
 FS_DIR = os.path.join(HERE, 'fs_programs')
 GRID_CSV = os.path.join(HERE, 'discover_equation_grid_results.csv')
 GRID_LOG = os.path.join(HERE, 'discover_equation_grid_log.txt')
-MAX_LLM_ROUNDS = 1  # left at 1 deliberately, this runs inside all 72 grid cells, raising it here would multiply grid search runtime; the richer multi-round loop runs once, in forecast.py, on only the single winning cell
+MAX_LLM_ROUNDS = 1
 PLATEAU_DELTA = 0.002
 PLATEAU_PATIENCE = 3
 R2_WEIGHT = 0.65
@@ -168,7 +160,7 @@ class WeeklyAutoencoder(nn.Module):
 
     def encode(self, x):
         return self.encoder(x)
-raw, INPUT_FEATURES = load_data(DATA_CSV, TRAIN_YEARS)
+(raw, INPUT_FEATURES) = load_data(DATA_CSV, TRAIN_YEARS)
 INPUT_DIM = len(INPUT_FEATURES)
 ae = WeeklyAutoencoder(INPUT_DIM, LATENT_DIM, [512, 256], 0.0087, 'elu', True)
 ae.load_state_dict(torch.load(MODEL_PATH, map_location='cpu', weights_only=True))
@@ -274,7 +266,7 @@ class ExtraTerm:
 
 @dataclass
 class Program:
-    program_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    program_id: str = field(default_factory=lambda : str(uuid.uuid4())[:8])
     n_lags: int = 5
     extra_terms: List[ExtraTerm] = field(default_factory=list)
     score: float = float('-inf')
@@ -289,7 +281,7 @@ class Program:
         return {'program_id': self.program_id, 'n_lags': self.n_lags, 'extra_terms': [t.to_dict() for t in self.extra_terms], 'score': self.score, 'generation': self.generation, 'parent_id': self.parent_id, 'spec': self.fingerprint()}
 
 def _build_aug(x_sc: np.ndarray, n_lags: int) -> np.ndarray:
-    T, d = x_sc.shape
+    (T, d) = x_sc.shape
     rows = []
     for i in range(n_lags, T):
         lags = [x_sc[i - lag] for lag in range(n_lags + 1)]
@@ -356,9 +348,9 @@ def build_library(X_aug: np.ndarray, week_arr: np.ndarray, n_lags: int, fs_terms
         pass
     var_map['week_arr'] = week_arr
     var_map['np'] = np
-    for fname, formula in llm_formulas:
+    for (fname, formula) in llm_formulas:
         try:
-            local = {k: v.copy() if isinstance(v, np.ndarray) else v for k, v in var_map.items()}
+            local = {k: v.copy() if isinstance(v, np.ndarray) else v for (k, v) in var_map.items()}
             result = eval(formula, {'__builtins__': {}}, local)
             result = np.array(result, dtype=np.float32).reshape(-1)
             if result.shape[0] == X_aug.shape[0] and np.all(np.isfinite(result)):
@@ -378,13 +370,13 @@ def build_library(X_aug: np.ndarray, week_arr: np.ndarray, n_lags: int, fs_terms
 
 def build_library_and_targets(x_sc: np.ndarray, weeks: np.ndarray, n_lags: int, fs_terms: List[ExtraTerm], llm_formulas: List[Tuple[str, str]]) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     X_aug = _build_aug(x_sc, n_lags)
-    Phi_full, nms = build_library(X_aug, weeks[n_lags:], n_lags, fs_terms, llm_formulas)
+    (Phi_full, nms) = build_library(X_aug, weeks[n_lags:], n_lags, fs_terms, llm_formulas)
     targets = (x_sc[n_lags + 1:] - x_sc[n_lags:-1]).astype(np.float32)
     n_rows = min(len(Phi_full) - 1, len(targets))
     return (Phi_full[:n_rows].copy(), targets[:n_rows].copy(), nms)
 
 def kalman_rts(s_obs: np.ndarray, u_seq: np.ndarray, q_diag: np.ndarray, r_diag: np.ndarray) -> np.ndarray:
-    T, d = s_obs.shape
+    (T, d) = s_obs.shape
     I = np.eye(d)
     Q = np.diag(q_diag)
     R = np.diag(r_diag)
@@ -419,7 +411,7 @@ def _smooth_one(prov, s_obs, weeks, beta_p, x_prev, q_diag, r_diag, n_lags, fs_t
     else:
         pass
     X_aug = _build_aug(x_prev, n_lags)
-    Phi_full, _ = build_library(X_aug, weeks[n_lags:], n_lags, fs_terms, llm_formulas)
+    (Phi_full, _) = build_library(X_aug, weeks[n_lags:], n_lags, fs_terms, llm_formulas)
     u_seq = np.zeros((T - 1, s_obs.shape[1]), dtype=np.float32)
     n_u = min(Phi_full.shape[0], T - 1)
     u_seq[:n_u] = Phi_full[:n_u] @ beta_p
@@ -463,7 +455,7 @@ def compute_province_quality_scores(province_data: Dict) -> pd.DataFrame:
     mean_inc_sc = float(SCALER.mean_[INC_COL])
     std_inc_sc = float(SCALER.scale_[INC_COL])
     records = []
-    for prov, pd_t in province_data.items():
+    for (prov, pd_t) in province_data.items():
         inc_sc = pd_t['s_obs'][:, INC_COL]
         inc_log = inc_sc * std_inc_sc + mean_inc_sc
         inc_raw = np.expm1(inc_log).clip(0)
@@ -522,7 +514,7 @@ def run_hierarchical_em(province_data: Dict, n_lags: int, fs_terms: List[ExtraTe
     sigma_u = SIGMA_U_FIXED
     sample_s = province_data[provinces[0]]['s_obs']
     sample_w = province_data[provinces[0]]['weeks']
-    Phi_samp, _, term_names = build_library_and_targets(sample_s, sample_w, n_lags, fs_terms, llm_formulas)
+    (Phi_samp, _, term_names) = build_library_and_targets(sample_s, sample_w, n_lags, fs_terms, llm_formulas)
     M = Phi_samp.shape[1]
 
     def _warm_copy(arr_init, shape):
@@ -539,24 +531,24 @@ def run_hierarchical_em(province_data: Dict, n_lags: int, fs_terms: List[ExtraTe
     x_smooth_all = {prov: province_data[prov]['s_obs'].copy() for prov in provinces}
     for em_iter in range(N_EM):
         if em_iter == 0 or (em_iter + 1) % 10 == 0 or em_iter == N_EM - 1:
-            print(f'      [EM] {label}: iteration {em_iter + 1}/{N_EM}')
+            pass
         else:
             pass
         beta_by_prov = {prov: g + h[province_data[prov]['cluster']] + u[prov] for prov in provinces}
         results = Parallel(n_jobs=N_JOBS)((delayed(_smooth_one)(prov, province_data[prov]['s_obs'], province_data[prov]['weeks'], beta_by_prov[prov], x_smooth_all[prov], q_diag, r_diag, n_lags, fs_terms, llm_formulas) for prov in provinces))
-        for prov, x_s in results:
+        for (prov, x_s) in results:
             x_smooth_all[prov] = x_s
         else:
             pass
         Phi_by_prov = {}
         tgt_by_prov = {}
         for prov in provinces:
-            Phi_p, tgt_p, _ = build_library_and_targets(x_smooth_all[prov], province_data[prov]['weeks'], n_lags, fs_terms, llm_formulas)
+            (Phi_p, tgt_p, _) = build_library_and_targets(x_smooth_all[prov], province_data[prov]['weeks'], n_lags, fs_terms, llm_formulas)
             Phi_by_prov[prov] = Phi_p
             tgt_by_prov[prov] = tgt_p
         else:
             pass
-        Phi_pool, res_pool = ([], [])
+        (Phi_pool, res_pool) = ([], [])
         for prov in provinces:
             cid = province_data[prov]['cluster']
             Phi_p = Phi_by_prov[prov]
@@ -599,12 +591,12 @@ def estimate_province_q_inc(model: Dict, province_data: Dict) -> Dict[str, float
     fs_terms = model['fs_terms']
     llm_formulas = model['llm_formulas']
     q_inc_by_prov = {}
-    for prov, pd_t in province_data.items():
+    for (prov, pd_t) in province_data.items():
         cid = pd_t['cluster']
         s_obs = pd_t['s_obs']
         beta_p = model['g'] + model['h'].get(cid, np.zeros_like(model['g'])) + model['u'].get(prov, np.zeros(model['g'].shape[0]))
         try:
-            Phi_p, tgt_p, _ = build_library_and_targets(s_obs, pd_t['weeks'], n_lags, fs_terms, llm_formulas)
+            (Phi_p, tgt_p, _) = build_library_and_targets(s_obs, pd_t['weeks'], n_lags, fs_terms, llm_formulas)
             expected_M = beta_p.shape[0]
             if Phi_p.shape[1] != expected_M:
                 Phi_p = Phi_p[:, :expected_M] if Phi_p.shape[1] > expected_M else np.pad(Phi_p, ((0, 0), (0, expected_M - Phi_p.shape[1])))
@@ -637,7 +629,7 @@ def forecast_sequential(s_test: np.ndarray, weeks_test: np.ndarray, beta_p: np.n
     yhat = []
     for t in range(n_lags, T - 1):
         x_aug_t = np.concatenate([x_hist[lag] for lag in range(n_lags + 1)]).reshape(1, -1)
-        Phi_t, _ = build_library(x_aug_t.astype(np.float32), np.array([weeks_test[t]]), n_lags, fs_terms, llm_formulas)
+        (Phi_t, _) = build_library(x_aug_t.astype(np.float32), np.array([weeks_test[t]]), n_lags, fs_terms, llm_formulas)
         expected_M = beta_p.shape[0]
         if Phi_t.shape[1] < expected_M:
             Phi_t = np.pad(Phi_t, ((0, 0), (0, expected_M - Phi_t.shape[1])), mode='constant')
@@ -670,7 +662,7 @@ def evaluate_on_split(province_data: Dict, model: Dict) -> Tuple[float, pd.DataF
     q_inc_by_prov = model.get('q_inc_by_prov', {})
     results = []
     prov_preds = {}
-    for prov, pd_t in province_data.items():
+    for (prov, pd_t) in province_data.items():
         cid = pd_t['cluster']
         s_test = pd_t['s_obs']
         weeks = pd_t['weeks']
@@ -709,7 +701,7 @@ def evaluate_on_split(province_data: Dict, model: Dict) -> Tuple[float, pd.DataF
 def compute_spectral_score(prov_preds: Dict[str, Tuple[np.ndarray, np.ndarray]], key_periods: List[int]=KEY_PERIODS, bin_window: int=SPECTRAL_BIN_WINDOW) -> float:
     lcm_periods = 52
     province_scores = []
-    for prov, (ytrue, yhat) in prov_preds.items():
+    for (prov, (ytrue, yhat)) in prov_preds.items():
         N = len(ytrue)
         if N < max(key_periods) + 1:
             continue
@@ -753,7 +745,7 @@ def combined_score(r2: float, spectral: float) -> float:
 def _build_province_dict(data_df: pd.DataFrame, years: List[int]) -> Dict:
     sub = data_df[data_df['year'].isin(years)]
     out = {}
-    for prov, grp in sub.groupby('province'):
+    for (prov, grp) in sub.groupby('province'):
         grp = grp.sort_values(['year', 'week']).reset_index(drop=True)
         s_sc = SCALER.transform(grp[STATE_COLS].values.astype(np.float32))
         weeks = grp['week'].values.astype(np.float32)
@@ -762,16 +754,9 @@ def _build_province_dict(data_df: pd.DataFrame, years: List[int]) -> Dict:
     else:
         pass
     return out
-
 _LATENT_MEANING_CACHE = None
 
 def compute_latent_covariate_meaning():
-    """Referee_report addition. z1 through z10 are anonymous autoencoder latent
-    dimensions, the LLM has no way to know what physical quantity each one stands
-    in for. This computes, once per run, the correlation of each z dimension with
-    the real named covariates in the raw data, on training years only so nothing
-    from validation or test leaks in, and gives the LLM a genuine grounding
-    sentence such as z6 correlates with avg_rainfall instead of an invented one."""
     global _LATENT_MEANING_CACHE
     if _LATENT_MEANING_CACHE is not None:
         return _LATENT_MEANING_CACHE
@@ -792,15 +777,13 @@ def compute_latent_covariate_meaning():
             corrs = corrs.dropna()
             corrs = corrs.reindex(corrs.abs().sort_values(ascending=False).index)
             top = corrs.head(2)
-            parts = [f'{name} r={val:+.2f}' for name, val in top.items()]
+            parts = [f'{name} r={val:+.2f}' for (name, val) in top.items()]
             meaning[zi] = ', '.join(parts) if parts else 'no strong correlation with observed covariates'
         else:
             pass
         _LATENT_MEANING_CACHE = meaning
-        print(f'  [LLM prompt] computed latent to covariate correlation table for {len(meaning)} z dimensions, training years only')
         return meaning
     except Exception as e:
-        print(f'  [LLM prompt] could not compute latent covariate meaning, {type(e).__name__}: {e}')
         _LATENT_MEANING_CACHE = {}
         return {}
     else:
@@ -808,9 +791,9 @@ def compute_latent_covariate_meaning():
     finally:
         pass
 
-def build_llm_prompt(fs_best: Program, history_rows: List[Dict], all_programs: List[Dict], val_r2: float, spectral_sc: float, spectral_delta: float, active_terms: List[Tuple[str, float]], pruned_terms: List[str], cluster_r2: Dict[int, float], llm_round: int, prev_suggestions: List[Dict], prev_survived: List[str], val_r2_history: List[float], latent_meaning: Dict[int, str] = None) -> str:
+def build_llm_prompt(fs_best: Program, history_rows: List[Dict], all_programs: List[Dict], val_r2: float, spectral_sc: float, spectral_delta: float, active_terms: List[Tuple[str, float]], pruned_terms: List[str], cluster_r2: Dict[int, float], llm_round: int, prev_suggestions: List[Dict], prev_survived: List[str], val_r2_history: List[float], latent_meaning: Dict[int, str]=None) -> str:
     if val_r2_history:
-        trend_parts = [f'Round {i + 1}: {r:.4f}' for i, r in enumerate(val_r2_history)]
+        trend_parts = [f'Round {i + 1}: {r:.4f}' for (i, r) in enumerate(val_r2_history)]
         trend_str = '  ' + '  |  '.join(trend_parts)
         if len(val_r2_history) >= 2:
             delta_overall = val_r2_history[-1] - val_r2_history[0]
@@ -821,7 +804,7 @@ def build_llm_prompt(fs_best: Program, history_rows: List[Dict], all_programs: L
         trend_str = '  (first round, no history yet)'
     prev_sug_str = ''
     if prev_suggestions:
-        active_coef_map = {nm: coef for nm, coef in active_terms}
+        active_coef_map = {nm: coef for (nm, coef) in active_terms}
         survived_set = set(prev_survived)
         prev_sug_str = '\nPREVIOUS LLM SUGGESTIONS AND OUTCOMES:\n'
         prev_sug_str += '  (terms with |coef| < 0.01 after fitting are dropped as noise)\n'
@@ -842,13 +825,13 @@ def build_llm_prompt(fs_best: Program, history_rows: List[Dict], all_programs: L
             pass
     else:
         pass
-    llm_active = [(nm, c) for nm, c in active_terms if nm.startswith('llm_')]
-    base_active = [(nm, c) for nm, c in active_terms if not nm.startswith('llm_')]
+    llm_active = [(nm, c) for (nm, c) in active_terms if nm.startswith('llm_')]
+    base_active = [(nm, c) for (nm, c) in active_terms if not nm.startswith('llm_')]
     active_str = '  BASE terms (top 10 by magnitude):\n'
-    active_str += '\n'.join((f'    {nm:35s}  coef={coef:+.5f}' for nm, coef in base_active[:10]))
+    active_str += '\n'.join((f'    {nm:35s}  coef={coef:+.5f}' for (nm, coef) in base_active[:10]))
     if llm_active:
         active_str += '\n  LLM terms currently in model:\n'
-        active_str += '\n'.join((f'    {nm:35s}  coef={coef:+.5f}' for nm, coef in llm_active))
+        active_str += '\n'.join((f'    {nm:35s}  coef={coef:+.5f}' for (nm, coef) in llm_active))
     else:
         pass
     n_pruned = len(pruned_terms)
@@ -858,9 +841,9 @@ def build_llm_prompt(fs_best: Program, history_rows: List[Dict], all_programs: L
         pruned_str += f", including LLM terms: {', '.join(pruned_llm)}"
     else:
         pass
-    cluster_str = '\n'.join((f'  Cluster {cid}: R2={r2:.4f}' for cid, r2 in sorted(cluster_r2.items())))
+    cluster_str = '\n'.join((f'  Cluster {cid}: R2={r2:.4f}' for (cid, r2) in sorted(cluster_r2.items())))
     if latent_meaning:
-        meaning_str = '\n'.join((f'  z{zi}: {desc}' for zi, desc in sorted(latent_meaning.items())))
+        meaning_str = '\n'.join((f'  z{zi}: {desc}' for (zi, desc) in sorted(latent_meaning.items())))
     else:
         meaning_str = '  (correlation table unavailable this run, treat z dimensions as unlabelled climate and mobility factors)'
     return f"""You are an expert epidemiologist and dynamical systems researcher collaborating on a SINDy (Sparse Identification of Nonlinear Dynamics) model for dengue forecasting.\n\nYOUR ROLE IN THE PIPELINE:\nYou are proposing candidate library terms for the dI/dt equation in a hierarchical SINDy model. The model structure is W_p = g + h_c + u_p where g is a global SINDy coefficient matrix shared by all 28 provinces, h_c is a small cluster correction, and u_p is a tiny province correction. You are improving g specifically for the incidence (dI/dt) dimension. After you propose terms, they are added to the regression library and the EM solver refits g on training data 2015-2018. Validation is then run on 2019 data only. Terms whose fitted coefficient falls below {ACTIVE_THRESH} in absolute value are dropped automatically. Only propose terms that have a strong biological or mathematical justification for a non-trivial coefficient.\n\nWHAT z1 THROUGH z10 ACTUALLY ARE:\nThese are not raw climate series, they are latent dimensions learned by an autoencoder compressing 36 raw covariates per province per week. The list below is the closest real world reading of what each latent dimension stands in for, computed as its correlation with the original named covariates on training years only. Ground your proposals in this instead of guessing which z is which.\n{meaning_str}\n\nBIOLOGICAL CONTEXT FOR TERM DESIGN:\nDengue transmission in the Dominican Republic follows a seasonal pattern driven by:\n1. Aedes aegypti breeding cycle: rainfall and temperature drive mosquito abundance with roughly a 2 to 4 week lag. Interaction terms like season * z_lag2 or z_lag3 capture this.\n2. Extrinsic incubation period: the virus takes 8 to 12 days to develop in the mosquito. A 1 to 2 week lag between climate forcing and incidence change is biologically correct.\n3. Herd immunity and susceptible depletion: after a large outbreak, incidence self-suppresses. A logistic saturation term like y_lag1 * (1 - y_lag1) or I_cumulative already exists in the base library. Products of incidence with lagged incidence can also capture refractory dynamics.\n4. Outbreak threshold: dengue tends to either grow explosively or fade. A threshold-like nonlinearity can be captured by y_lag1^2 or y_lag1 * z_climate without needing explicit threshold constants.\n5. Semi-annual cycle: some provinces show a secondary peak around week 26. A 26-week seasonal interaction on top of the 52-week base already in the model can capture this.\n\nVAL R2 TREND ACROSS ROUNDS (training 2015-2018, validation 2019):\n{trend_str}\nIf val R2 is declining across rounds, your previous suggestions introduced terms that overfit 2019. Propose fewer and more biologically specific terms this round.\n\nCURRENT MODEL STATE (round {llm_round}):\nValidation R2 = {val_r2:.4f}  |  Spectral score = {spectral_sc:.4f}  (annual + semi-annual periodicity)\nSpectral trend this round = {spectral_delta:+.4f}  ({('improving' if spectral_delta >= 0 else 'DECLINING: prioritise seasonal structure terms')})\n\nPer-cluster validation R2:\n{cluster_str}\nNote: Cluster 3 (Azua, Peravia, San Jose de Ocoa, mountain provinces) is the hardest. These provinces have irregular year-to-year outbreak timing. Consider threshold or saturation terms for these dynamics.\n\nACTIVE TERMS IN THE CURRENT INCIDENCE EQUATION (sorted by coefficient magnitude):\n{active_str}\n\nTerms dropped this round (|coef| < {ACTIVE_THRESH}):\n  {pruned_str}\n{prev_sug_str}\nYOUR TASK:\nSuggest exactly 8 new candidate library terms grounded in dengue biology. Each formula must be a valid numpy expression using ONLY the variables below. Do NOT use any named constants (threshold, beta, K, R0, mu) or any variable not in the list. Every formula must evaluate to a numpy array of the same shape as the input arrays.\n\nBiological priorities in order:\n1. Climate-lag interactions: seasonal signal (sin52 or cos52) multiplied by a lagged z-dimension, e.g. np.sin(2*np.pi*week_arr/52) * z3_lag2.\n2. Incidence-environment couplings at biologically correct lags (1 to 3 weeks), e.g. y_lag1 * z2_lag2.\n3. Susceptible depletion proxies: product of current incidence with a lagged incidence difference, e.g. y_lag0 * (y_lag1 - y_lag3).\n4. Secondary seasonality: 26-week interaction, e.g. np.sin(2*np.pi*week_arr/26) * y_lag1.\n5. Outbreak nonlinearity: squared incidence or incidence times a climate z, e.g. y_lag1**2 or y_lag1 * z5_lag2.\nDo NOT propose pure polynomial interactions of z-dimensions with no incidence involvement, such as z3*z7 or z4^2. These have no direct biological pathway to dI/dt and have consistently produced near-zero coefficients in previous rounds.\n\nRespond ONLY with a valid JSON array. No text before or after. Example:\n[\n  {{"name": "sin52_z3_lag2", "formula": "np.sin(2*np.pi*week_arr/52) * z3_lag2", "reason": "seasonal modulation by climate lag 2 weeks, matching extrinsic incubation period"}},\n  {{"name": "y_z2_lag2", "formula": "y_lag1 * z2_lag2", "reason": "incidence times climate forcing at 2-week lag, vectorial capacity proxy"}},\n  {{"name": "y_depletion", "formula": "y_lag0 * (y_lag1 - y_lag3)", "reason": "susceptible depletion: high incidence suppresses future growth"}},\n  ...\n]\n\nCOMPLETE LIST of available variables. Use ONLY these:\ny_lag0, y_lag1, y_lag2, y_lag3\nz1_lag0, z2_lag0, z3_lag0, z4_lag0, z5_lag0, z6_lag0, z7_lag0, z8_lag0, z9_lag0, z10_lag0\nz1_lag1, z2_lag1, z3_lag1, z4_lag1, z5_lag1, z6_lag1, z7_lag1, z8_lag1, z9_lag1, z10_lag1\nz1_lag2, z2_lag2, z3_lag2, z4_lag2, z5_lag2, z6_lag2, z7_lag2, z8_lag2, z9_lag2, z10_lag2\nz1_lag3, z2_lag3, z3_lag3, z4_lag3, z5_lag3, z6_lag3, z7_lag3, z8_lag3, z9_lag3, z10_lag3\nweek_arr, np\n\nDo NOT use: threshold, beta, K, K1, K2, alpha, gamma, R0, mu, or any name not in the list."""
@@ -873,12 +856,11 @@ def query_llm(prompt: str) -> str:
             resp.raise_for_status()
             result = resp.json().get('message', {}).get('content', '')
             if model_name != OLLAMA_MODEL_PRIMARY:
-                print(f'  [LLM] primary model unavailable, used fallback model {model_name} instead')
+                pass
             else:
                 pass
             return result
         except Exception as e:
-            print(f'  [LLM] Ollama call with {model_name} FAILED, {type(e).__name__}: {e}')
             continue
         else:
             pass
@@ -886,7 +868,6 @@ def query_llm(prompt: str) -> str:
             pass
     else:
         pass
-    print('  [LLM] all configured models failed, returning empty response for this round')
     return ''
 
 def parse_llm_suggestions(raw_text: str) -> List[Dict]:
@@ -941,14 +922,14 @@ def suggestions_to_formulas(suggestions: List[Dict], X_aug_sample: np.ndarray, n
         else:
             pass
         try:
-            local = {k: v.copy() if isinstance(v, np.ndarray) else v for k, v in var_map.items()}
+            local = {k: v.copy() if isinstance(v, np.ndarray) else v for (k, v) in var_map.items()}
             result = eval(formula, {'__builtins__': {}}, local)
             result = np.array(result, dtype=np.float32).reshape(-1)
             if result.shape[0] != X_aug_sample.shape[0] or not np.all(np.isfinite(result)):
                 continue
             else:
                 pass
-            local1 = {k: v.copy() if isinstance(v, np.ndarray) else v for k, v in single_map.items()}
+            local1 = {k: v.copy() if isinstance(v, np.ndarray) else v for (k, v) in single_map.items()}
             result1 = eval(formula, {'__builtins__': {}}, local1)
             result1 = np.array(result1, dtype=np.float32).reshape(-1)
             if result1.shape[0] != 1 or not np.all(np.isfinite(result1)):
@@ -970,8 +951,8 @@ def get_active_and_pruned(model: Dict) -> Tuple[List[Tuple[str, float]], List[st
     g = model['g']
     names = model['term_names']
     g_inc = g[:, INC_COL] if g.ndim == 2 else g
-    active = [(nm, float(coef)) for nm, coef in zip(names, g_inc) if abs(float(coef)) > ACTIVE_THRESH]
-    pruned = [nm for nm, coef in zip(names, g_inc) if abs(float(coef)) <= ACTIVE_THRESH]
+    active = [(nm, float(coef)) for (nm, coef) in zip(names, g_inc) if abs(float(coef)) > ACTIVE_THRESH]
+    pruned = [nm for (nm, coef) in zip(names, g_inc) if abs(float(coef)) <= ACTIVE_THRESH]
     active.sort(key=lambda x: abs(x[1]), reverse=True)
     return (active, pruned)
 
@@ -979,10 +960,10 @@ def _tune_elasticnet_l1(fs_train_pd, alpha):
     from sklearn.linear_model import ElasticNet
     from sklearn.model_selection import KFold
     seed_prog = Program(n_lags=3)
-    Phi_list, tgt_list = ([], [])
-    for prov, pd_t in fs_train_pd.items():
+    (Phi_list, tgt_list) = ([], [])
+    for (prov, pd_t) in fs_train_pd.items():
         try:
-            Phi_p, tgt_p, _ = build_library_and_targets(pd_t['s_obs'], pd_t['weeks'], 3, [], [])
+            (Phi_p, tgt_p, _) = build_library_and_targets(pd_t['s_obs'], pd_t['weeks'], 3, [], [])
             Phi_list.append(Phi_p)
             tgt_list.append(tgt_p[:, INC_COL:INC_COL + 1])
         except Exception:
@@ -999,11 +980,11 @@ def _tune_elasticnet_l1(fs_train_pd, alpha):
         pass
     Phi_all = np.vstack(Phi_list)
     tgt_all = np.vstack(tgt_list).ravel()
-    best_l1, best_score = (0.5, float('-inf'))
+    (best_l1, best_score) = (0.5, float('-inf'))
     kf = KFold(n_splits=3, shuffle=True, random_state=42)
     for l1 in FS_EN_L1_RATIOS:
         fold_scores = []
-        for tr_idx, va_idx in kf.split(Phi_all):
+        for (tr_idx, va_idx) in kf.split(Phi_all):
             try:
                 reg = ElasticNet(alpha=alpha, l1_ratio=l1, fit_intercept=False, max_iter=5000)
                 reg.fit(Phi_all[tr_idx], tgt_all[tr_idx])
@@ -1019,7 +1000,7 @@ def _tune_elasticnet_l1(fs_train_pd, alpha):
             pass
         mean_sc = float(np.mean(fold_scores))
         if mean_sc > best_score:
-            best_score, best_l1 = (mean_sc, l1)
+            (best_score, best_l1) = (mean_sc, l1)
         else:
             pass
     else:
@@ -1030,10 +1011,9 @@ def run_funsearch(fs_tau=None, score_algo='ridge', bias_table=None, save_path=No
     from sklearn.linear_model import Ridge, Lasso, ElasticNet, BayesianRidge
     _tau = fs_tau if fs_tau is not None else TAU0
     _alpha = _tau ** 2
-    _bias = bias_table if bias_table is not None else {isl: (v[0], v[1]) for isl, v in ISLAND_BIAS_TABLE.items()}
+    _bias = bias_table if bias_table is not None else {isl: (v[0], v[1]) for (isl, v) in ISLAND_BIAS_TABLE.items()}
     fs_train_pd = _build_province_dict(latent, FS_INNER_TRAIN)
     fs_val_pd = _build_province_dict(latent, FS_INNER_VAL)
-    print(f'  [FunSearch] starting, {FS_N_ISLANDS} islands x {FS_ISLAND_SIZE} programs, {FS_N_ITERATIONS} iterations, tau={fs_tau}, score_algo={score_algo}')
     _l1_ratio = 0.5
     if score_algo == 'elasticnet':
         _l1_ratio = _tune_elasticnet_l1(fs_train_pd, _alpha)
@@ -1061,9 +1041,9 @@ def run_funsearch(fs_tau=None, score_algo='ridge', bias_table=None, save_path=No
             pass
         try:
             n_lags = max(prog.n_lags, 1)
-            Phi_list, tgt_list = ([], [])
-            for prov, pd_t in fs_train_pd.items():
-                Phi_p, tgt_p, _ = build_library_and_targets(pd_t['s_obs'], pd_t['weeks'], n_lags, prog.extra_terms, [])
+            (Phi_list, tgt_list) = ([], [])
+            for (prov, pd_t) in fs_train_pd.items():
+                (Phi_p, tgt_p, _) = build_library_and_targets(pd_t['s_obs'], pd_t['weeks'], n_lags, prog.extra_terms, [])
                 Phi_list.append(Phi_p)
                 tgt_list.append(tgt_p[:, INC_COL:INC_COL + 1])
             else:
@@ -1073,8 +1053,8 @@ def run_funsearch(fs_tau=None, score_algo='ridge', bias_table=None, save_path=No
             reg = _make_reg()
             reg.fit(Phi_all, tgt_all.ravel())
             r2_vals = []
-            for prov, pd_t in fs_val_pd.items():
-                Phi_v, tgt_v, _ = build_library_and_targets(pd_t['s_obs'], pd_t['weeks'], n_lags, prog.extra_terms, [])
+            for (prov, pd_t) in fs_val_pd.items():
+                (Phi_v, tgt_v, _) = build_library_and_targets(pd_t['s_obs'], pd_t['weeks'], n_lags, prog.extra_terms, [])
                 if score_algo == 'bayesian_ridge':
                     pred = reg.predict(Phi_v)
                 else:
@@ -1083,7 +1063,7 @@ def run_funsearch(fs_tau=None, score_algo='ridge', bias_table=None, save_path=No
                 r2_vals.append((float(r2_score(tgt_v[:, INC_COL], pred)), pop))
             else:
                 pass
-            score = sum((r * p for r, p in r2_vals)) / sum((p for _, p in r2_vals))
+            score = sum((r * p for (r, p) in r2_vals)) / sum((p for (_, p) in r2_vals))
         except Exception:
             score = float('-inf')
         else:
@@ -1153,10 +1133,9 @@ def run_funsearch(fs_tau=None, score_algo='ridge', bias_table=None, save_path=No
     for iteration in range(FS_N_ITERATIONS):
         if iteration == 0 or (iteration + 1) % 10 == 0 or iteration == FS_N_ITERATIONS - 1:
             _best_so_far = max((p.score for isl in islands for p in isl))
-            print(f'    [FunSearch] iteration {iteration + 1}/{FS_N_ITERATIONS}  best_score={_best_so_far:+.4f}')
         else:
             pass
-        for isl_idx, island in enumerate(islands):
+        for (isl_idx, island) in enumerate(islands):
             _weights = [max(0, p.score + 1) for p in island]
             if sum(_weights) <= 0:
                 parent = random.choice(island)
@@ -1186,7 +1165,6 @@ def run_funsearch(fs_tau=None, score_algo='ridge', bias_table=None, save_path=No
         else:
             pass
         if (iteration + 1) % FS_MIGRATE_EVERY == 0:
-            print(f'    [FunSearch] iteration {iteration + 1}, migration round')
             for isl_idx in range(FS_N_ISLANDS):
                 best = max(islands[isl_idx], key=lambda p: p.score)
                 target = (isl_idx + 1) % FS_N_ISLANDS
@@ -1203,7 +1181,6 @@ def run_funsearch(fs_tau=None, score_algo='ridge', bias_table=None, save_path=No
     else:
         pass
     best = max((prog for isl in islands for prog in isl), key=lambda p: p.score)
-    print(f'  [FunSearch] done, best score={best.score:+.4f}  n_lags={best.n_lags}  n_extra_terms={len(best.extra_terms)}')
     if save_path is not None:
         fs_json_out = save_path + '_best.json'
         fs_hist_out = save_path + '_history.csv'
@@ -1219,10 +1196,9 @@ def _run_one_grid_cell(run_label, fs_tau, score_algo, diversity_key, train_pd, v
     import copy as _copy
     os.makedirs(FS_DIR, exist_ok=True)
     fs_save = os.path.join(FS_DIR, run_label.replace(' ', '_'))
-    bias_table = {isl: (lr, nb) for isl, (lr, nb) in FS_GRID_DIVERSITY[diversity_key].items()}
+    bias_table = {isl: (lr, nb) for (isl, (lr, nb)) in FS_GRID_DIVERSITY[diversity_key].items()}
 
     def _log(msg):
-        print(msg)
         if grid_log_fh is not None:
             grid_log_fh.write(str(msg) + '\n')
             grid_log_fh.flush()
@@ -1232,7 +1208,7 @@ def _run_one_grid_cell(run_label, fs_tau, score_algo, diversity_key, train_pd, v
     _log(f'  GRID CELL: {run_label}')
     _log(f'  fs_tau={fs_tau}  score_algo={score_algo}  diversity={diversity_key}')
     _log(f"{'=' * 60}")
-    fs_best, history_rows, all_programs = run_funsearch(fs_tau=fs_tau, score_algo=score_algo, bias_table=bias_table, save_path=fs_save)
+    (fs_best, history_rows, all_programs) = run_funsearch(fs_tau=fs_tau, score_algo=score_algo, bias_table=bias_table, save_path=fs_save)
     n_lags = max(fs_best.n_lags, 3)
     fs_terms = fs_best.extra_terms
     _log(f'  FS done: n_lags={n_lags}  n_extra={len(fs_terms)}  fs_score={fs_best.score:+.4f}')
@@ -1252,12 +1228,12 @@ def _run_one_grid_cell(run_label, fs_tau, score_algo, diversity_key, train_pd, v
         warm_g = model_train['g'].copy()
         warm_h = {cid: model_train['h'][cid].copy() for cid in CLUSTER_IDS}
         warm_u = {prov: model_train['u'][prov].copy() for prov in train_pd}
-        val_r2, val_df, val_preds = evaluate_on_split(val_pd, model_train)
+        (val_r2, val_df, val_preds) = evaluate_on_split(val_pd, model_train)
         spectral_sc = compute_spectral_score(val_preds)
         combined_sc = combined_score(val_r2, spectral_sc)
         val_r2_last = val_r2
         spectral_sc_last = spectral_sc
-        active_terms, pruned_terms = get_active_and_pruned(model_train)
+        (active_terms, pruned_terms) = get_active_and_pruned(model_train)
         cluster_r2 = {int(cid): float(val_df[val_df['cluster_id'] == cid]['r2'].mean()) for cid in val_df['cluster_id'].unique()}
         if combined_sc > best_combined:
             best_combined = combined_sc
@@ -1274,8 +1250,8 @@ def _run_one_grid_cell(run_label, fs_tau, score_algo, diversity_key, train_pd, v
         else:
             pass
         new_formulas = suggestions_to_formulas(suggestions, sample_aug, n_lags, sample_weeks)
-        existing_names = {nm for nm, _ in llm_formulas}
-        for nm, formula in new_formulas:
+        existing_names = {nm for (nm, _) in llm_formulas}
+        for (nm, formula) in new_formulas:
             if nm not in existing_names:
                 llm_formulas.append((nm, formula))
             else:
@@ -1288,8 +1264,8 @@ def _run_one_grid_cell(run_label, fs_tau, score_algo, diversity_key, train_pd, v
         best_model_so_far = model_train
     else:
         pass
-    survived_names = {t for t, _ in get_active_and_pruned(best_model_so_far)[0] if t.startswith('llm_')}
-    final_llm_formulas = [(nm, formula) for nm, formula in llm_formulas if f'llm_{nm}' in survived_names]
+    survived_names = {t for (t, _) in get_active_and_pruned(best_model_so_far)[0] if t.startswith('llm_')}
+    final_llm_formulas = [(nm, formula) for (nm, formula) in llm_formulas if f'llm_{nm}' in survived_names]
     if not final_llm_formulas:
         final_llm_formulas = llm_formulas
     else:
@@ -1297,13 +1273,13 @@ def _run_one_grid_cell(run_label, fs_tau, score_algo, diversity_key, train_pd, v
     model_final = run_hierarchical_em(trainval_pd, n_lags, fs_terms, final_llm_formulas, label=f'{run_label} FINAL on TRAIN+VAL')
     q_inc_by_prov = estimate_province_q_inc(model_final, trainval_pd)
     model_final['q_inc_by_prov'] = q_inc_by_prov
-    test_r2, test_df_cell, test_preds_cell = evaluate_on_split(test_pd, model_final)
+    (test_r2, test_df_cell, test_preds_cell) = evaluate_on_split(test_pd, model_final)
     test_spectral = compute_spectral_score(test_preds_cell)
     test_combined = combined_score(test_r2, test_spectral)
     test_df_incl = test_df_cell[test_df_cell['province'].isin(included_provinces)]
     test_r2_filt = float(test_df_incl['r2'].mean()) if len(test_df_incl) > 0 else float('nan')
     _log(f'\n  PER-PROVINCE TEST R2 ({run_label}):')
-    for _, row in test_df_cell.sort_values('r2', ascending=False).iterrows():
+    for (_, row) in test_df_cell.sort_values('r2', ascending=False).iterrows():
         excl = '  EXCL' if row['province'] in excluded_provinces else ''
         _log(f"    {row['province']:35s}  R2={row['r2']:+.4f}{excl}")
     else:
@@ -1325,13 +1301,11 @@ if __name__ == '__main__':
     quality_df.to_csv(os.path.join(HERE, 'quality_scores.csv'), index=False)
     included_provinces = set()
     excluded_provinces = set()
-    print('\n[STAGE] province quality gate')
-    for _, row in quality_df.iterrows():
+    for (_, row) in quality_df.iterrows():
         prov = row['province']
         qs = row['quality_score']
         status = 'INCLUDE' if qs >= QUALITY_THRESHOLD else 'EXCLUDE'
         weak_tag = ' WEAK' if prov in WEAK_PROVINCES else ''
-        print(f'  [quality] {prov:35s} Q={qs:.4f}  {status}{weak_tag}')
         if qs >= QUALITY_THRESHOLD:
             included_provinces.add(prov)
         else:
@@ -1339,32 +1313,28 @@ if __name__ == '__main__':
     else:
         pass
     if excluded_provinces:
-        print(f'  [quality] excluded from headline R2: {sorted(excluded_provinces)}')
+        pass
     else:
-        print('  [quality] no provinces excluded')
+        pass
     overlap_weak_excluded = WEAK_PROVINCES & excluded_provinces
     _cluster_prov: Dict[int, List[str]] = {}
-    for prov, pd_ in train_pd.items():
+    for (prov, pd_) in train_pd.items():
         cid = int(pd_.get('cluster', -1))
         _cluster_prov.setdefault(cid, []).append(prov)
     else:
         pass
-    print('\n[STAGE] province clusters')
     for cid in sorted(_cluster_prov):
         _rows = sum((len(train_pd[p]['s_obs']) for p in _cluster_prov[cid]))
-        print(f'  [cluster {cid}] {len(_cluster_prov[cid])} provinces, {_rows} training rows')
         for p in sorted(_cluster_prov[cid]):
             _n = len(train_pd[p]['s_obs'])
             _mean_inc = float(np.mean(np.expm1(train_pd[p]['s_obs'][:, INC_COL])))
             qs_val = float(quality_df[quality_df['province'] == p]['quality_score'].values[0]) if p in quality_df['province'].values else -1.0
             _is_weak = 'WEAK ' if p in WEAK_PROVINCES else '     '
             _excl = 'EXCL' if p in excluded_provinces else '    '
-            print(f'      {p:35s} n={_n:4d}  mean_inc={_mean_inc:8.4f}  Q={qs_val:.4f}  {_is_weak}{_excl}')
         else:
             pass
     else:
         pass
-    print(f'\n[STAGE] grid search starting, {len(FS_GRID_DIVERSITY) * len(FS_GRID_ALGOS) * len(FS_GRID_TAU)} cells total')
     grid_results = []
     os.makedirs(FS_DIR, exist_ok=True)
     total_cells = len(FS_GRID_DIVERSITY) * len(FS_GRID_ALGOS) * len(FS_GRID_TAU)
@@ -1375,7 +1345,6 @@ if __name__ == '__main__':
                 for tau in FS_GRID_TAU:
                     done += 1
                     label = f'tau{tau}_{algo}_{div_key}'
-                    print(f'\n[GRID {done}/{total_cells}] {label}')
                     try:
                         row = _run_one_grid_cell(label, tau, algo, div_key, train_pd, val_pd, trainval_pd, test_pd, included_provinces, excluded_provinces, quality_df, _grid_log)
                     except Exception as _err:
@@ -1388,7 +1357,6 @@ if __name__ == '__main__':
                         pass
                     grid_results.append(row)
                     pd.DataFrame(grid_results).to_csv(GRID_CSV, index=False)
-                    print(f"[GRID {done}/{total_cells}] {label} done  val_r2={row.get('val_r2', float('nan')):.4f}  test_r2_filt={row.get('test_r2_filt', float('nan')):.4f}")
                 else:
                     pass
             else:
@@ -1405,18 +1373,12 @@ if __name__ == '__main__':
     finally:
         pass
     header = f"  {'Label':30s}  {'tau':>4}  {'algo':>14}  {'div':>7}  {'FS_sc':>7}  {'val_R2':>7}  {'test_R2':>8}  {'test_R2_filt':>13}"
-    print('\n' + '=' * 90)
-    print('  GRID SEARCH COMPLETE, ranked by validation R2')
-    print('=' * 90)
-    print(header)
-    for _, row in results_df_sorted.iterrows():
-        print(f"  {row['run_label']:30s}  {row['fs_tau']:>4}  {row['score_algo']:>14}  {row['diversity']:>7}  {row['fs_score']:>7.4f}  {row['val_r2']:>7.4f}  {row['test_r2']:>8.4f}  {row['test_r2_filt']:>13.4f}")
+    for (_, row) in results_df_sorted.iterrows():
+        pass
     else:
         pass
     if len(results_df_sorted) > 0:
         _winner = results_df_sorted.iloc[0]
-        print(f"\n  WINNER: {_winner['run_label']}  val_R2={_winner['val_r2']:.4f}  test_R2_filt={_winner['test_r2_filt']:.4f}")
-        print("  Update forecast.py's WINNING_FS_TAU / WINNING_SCORE_ALGO / WINNING_DIVERSITY / WINNING_LABEL to match this cell.")
     else:
         pass
 else:

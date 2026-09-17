@@ -1,1 +1,0 @@
-Runs province quality scoring and the island-based FunSearch search for lag order and library structure, across a grid of configurations, with FunSearch's own inner validation held on 2018 only so it never overlaps with the outer model-selection year, 2019. Selects the winning configuration on validation performance alone and saves it for forecast.py to load.

@@ -1,1 +1,0 @@
-Runs the fitted equation's normal one-step-ahead, Kalman-corrected forecast across the full 2015-2023 span and scores it two ways: pooled over every province-week, and as one series per week after averaging all 28 provinces together (the 'national mean' view). Produces the fit-years-vs-test-years comparison table.

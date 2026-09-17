@@ -6,10 +6,10 @@ from torch.utils.data import DataLoader, TensorDataset
 import optuna
 from optuna.samplers import TPESampler
 from utils import load_data
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
+HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_CSV = os.path.join(HERE, 'extended_input_normalized.csv')
-TRAIN_YEARS = list(range(2015, 2019))
-VAL_YEARS = [2019]
+TRAIN_YEARS = list(range(2015, 2020))
+VAL_YEARS = [2020, 2021]
 N_TRIALS = 100
 EPOCHS = 200
 PATIENCE = 40
@@ -45,7 +45,7 @@ class WeeklyAutoencoder(nn.Module):
 
     def forward(self, x):
         return self.decoder(self.encoder(x))
-raw, INPUT_FEATURES = load_data(DATA_CSV, TRAIN_YEARS)
+(raw, INPUT_FEATURES) = load_data(DATA_CSV, TRAIN_YEARS)
 INPUT_DIM = len(INPUT_FEATURES)
 train_mask = raw['year'].isin(TRAIN_YEARS)
 val_mask = raw['year'].isin(VAL_YEARS)
@@ -70,7 +70,7 @@ def objective(trial):
     patience_count = 0
     for epoch in range(1, EPOCHS + 1):
         model.train()
-        for xb, _ in train_loader:
+        for (xb, _) in train_loader:
             optimizer.zero_grad()
             loss = nn.functional.mse_loss(model(xb), xb)
             if torch.isnan(loss):
@@ -100,10 +100,10 @@ pruner = optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=30)
 study = optuna.create_study(direction='minimize', sampler=sampler, pruner=pruner)
 study.optimize(objective, n_trials=N_TRIALS, show_progress_bar=True)
 best = study.best_trial
-for k, v in best.params.items():
+for (k, v) in best.params.items():
     pass
 config_path = os.path.join(HERE, 'best_config_autoencoder.txt')
 with open(config_path, 'w') as f:
     f.write(f'val_mse={best.value:.6f}\n')
-    for k, v in best.params.items():
+    for (k, v) in best.params.items():
         f.write(f'{k}={v}\n')

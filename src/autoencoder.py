@@ -11,15 +11,15 @@ from torch.utils.data import DataLoader, TensorDataset
 import optuna
 from optuna.samplers import TPESampler
 from utils import load_data
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
+HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_CSV = os.path.join(HERE, 'extended_input_normalized.csv')
 MODELS_DIR = os.path.join(HERE, 'models')
 LATENT_DIR = os.path.join(HERE, 'latents')
 PLOTS_DIR = os.path.join(HERE, 'plots')
 for d in [MODELS_DIR, LATENT_DIR, PLOTS_DIR]:
     os.makedirs(d, exist_ok=True)
-TRAIN_YEARS = list(range(2015, 2019))
-VAL_YEARS = [2019]
+TRAIN_YEARS = list(range(2015, 2020))
+VAL_YEARS = [2020, 2021]
 TEST_YEARS = [2022, 2023]
 N_TRIALS = 100
 EPOCHS = 200
@@ -66,7 +66,7 @@ def r2(y, yhat):
     ss_res = ((y - yhat) ** 2).sum()
     ss_tot = ((y - y.mean()) ** 2).sum()
     return (1.0 - ss_res / (ss_tot + 1e-08)).item()
-raw, INPUT_FEATURES = load_data(DATA_CSV, TRAIN_YEARS)
+(raw, INPUT_FEATURES) = load_data(DATA_CSV, TRAIN_YEARS)
 INPUT_DIM = len(INPUT_FEATURES)
 train_mask = raw['year'].isin(TRAIN_YEARS)
 val_mask = raw['year'].isin(VAL_YEARS)
@@ -97,7 +97,7 @@ def objective(trial):
     patience_count = 0
     for epoch in range(1, EPOCHS + 1):
         model.train()
-        for xb, _ in train_loader:
+        for (xb, _) in train_loader:
             optimizer.zero_grad()
             loss = nn.functional.mse_loss(model(xb), xb)
             if torch.isnan(loss):
@@ -139,12 +139,12 @@ WEIGHT_DECAY = best.params['weight_decay']
 BATCH_SIZE = best.params['batch_size']
 ACTIVATION = best.params['activation']
 USE_BATCHNORM = best.params['use_batchnorm']
-for k, v in best.params.items():
+for (k, v) in best.params.items():
     pass
 config_path = os.path.join(HERE, 'best_config_autoencoder.txt')
 with open(config_path, 'w') as f:
     f.write(f'val_mse={best.value:.6f}\n')
-    for k, v in best.params.items():
+    for (k, v) in best.params.items():
         f.write(f'{k}={v}\n')
 final_model = WeeklyAutoencoder(INPUT_DIM, LATENT_DIM, HIDDEN_DIMS, DROPOUT, ACTIVATION, USE_BATCHNORM)
 optimizer = torch.optim.AdamW(final_model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
@@ -158,7 +158,7 @@ n_params = sum((p.numel() for p in final_model.parameters()))
 for epoch in range(1, FINAL_EPOCHS + 1):
     final_model.train()
     batch_losses = []
-    for xb, _ in trainval_loader:
+    for (xb, _) in trainval_loader:
         optimizer.zero_grad()
         loss = nn.functional.mse_loss(final_model(xb), xb)
         loss.backward()
@@ -203,7 +203,7 @@ for i in range(INPUT_DIM):
     ss_t = ((X_test_np[:, i] - X_test_np[:, i].mean()) ** 2).sum()
     per_feature_r2.append(1.0 - ss_r / (ss_t + 1e-08))
 feat_r2_df = pd.DataFrame({'feature': INPUT_FEATURES, 'r2': per_feature_r2}).sort_values('r2')
-fig, ax = plt.subplots(figsize=(8, 4))
+(fig, ax) = plt.subplots(figsize=(8, 4))
 ax.plot(train_losses, label='Train+Val')
 ax.set_xlabel('Epoch')
 ax.set_ylabel('MSE Loss')
@@ -213,7 +213,7 @@ ax.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.savefig(os.path.join(PLOTS_DIR, f'training_loss_dim{LATENT_DIM}.png'), dpi=150)
 plt.close()
-fig, ax = plt.subplots(figsize=(12, 5))
+(fig, ax) = plt.subplots(figsize=(12, 5))
 colors = ['#d62728' if r < 0.9 else '#2ca02c' for r in feat_r2_df['r2']]
 ax.barh(feat_r2_df['feature'], feat_r2_df['r2'], color=colors)
 ax.axvline(0.9, color='black', linestyle='--', linewidth=0.8, label='R2=0.9')

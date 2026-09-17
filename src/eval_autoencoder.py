@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from utils import load_data
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: this script now lives one level down, in src/
+HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_CSV = os.path.join(HERE, 'extended_input_normalized.csv')
 CFG_PATH = os.path.join(HERE, 'best_config_autoencoder.txt')
 MODELS_DIR = os.path.join(HERE, 'models')
@@ -25,7 +25,7 @@ def load_config(path):
             line = line.strip()
             if not line or line.startswith('val_mse') or line.startswith('val_r2'):
                 continue
-            k, v = line.split('=', 1)
+            (k, v) = line.split('=', 1)
             cfg[k.strip()] = v.strip()
     return cfg
 ACTS = {'relu': nn.ReLU, 'leakyrelu': nn.LeakyReLU, 'elu': nn.ELU}
@@ -70,14 +70,14 @@ DROPOUT = float(cfg['dropout'])
 LR = float(cfg['lr'])
 ACTIVATION = cfg['activation']
 USE_BATCHNORM = cfg['use_batchnorm'] == 'True'
-raw, INPUT_FEATURES = load_data(DATA_CSV, TRAIN_YEARS)
+(raw, INPUT_FEATURES) = load_data(DATA_CSV, TRAIN_YEARS)
 INPUT_DIM = len(INPUT_FEATURES)
 test_mask = raw['year'].isin(TEST_YEARS)
 X_test = torch.tensor(raw.loc[test_mask, INPUT_FEATURES].values.astype(np.float32))
 meta_test = raw.loc[test_mask, ['province', 'year', 'week']].reset_index(drop=True)
 INCIDENCE_WEIGHT = 5.0
 feat_weights = torch.ones(INPUT_DIM)
-for i, f in enumerate(INPUT_FEATURES):
+for (i, f) in enumerate(INPUT_FEATURES):
     if 'incidence' in f or 'inc_momentum' in f:
         feat_weights[i] = INCIDENCE_WEIGHT
 model = WeeklyAutoencoder(INPUT_DIM, LATENT_DIM, HIDDEN_DIMS, DROPOUT, ACTIVATION, USE_BATCHNORM)
@@ -106,7 +106,7 @@ for i in range(INPUT_DIM):
     ss_t = ((X_test_np[:, i] - X_test_np[:, i].mean()) ** 2).sum()
     per_feature_r2.append(1.0 - ss_r / (ss_t + 1e-08))
 feat_r2_df = pd.DataFrame({'feature': INPUT_FEATURES, 'r2': per_feature_r2}).sort_values('r2')
-fig, ax = plt.subplots(figsize=(12, 5))
+(fig, ax) = plt.subplots(figsize=(12, 5))
 colors = ['#d62728' if r < 0.9 else '#2ca02c' for r in feat_r2_df['r2']]
 ax.barh(feat_r2_df['feature'], feat_r2_df['r2'], color=colors)
 ax.axvline(0.9, color='black', linestyle='--', linewidth=0.8, label='R2=0.9')

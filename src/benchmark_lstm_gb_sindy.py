@@ -1,55 +1,3 @@
-"""
-This script adds two comparison baselines not covered elsewhere in the
-repo, without duplicating any data
-loading, scaling, splitting, or model-fitting logic: it imports the already
-validated forecast script as a module and reuses its SCALER, TRAIN/VAL/
-TRAINVAL/TEST year splits, quality-gate logic, feature/library builders, and
-EM fitting routine directly. That means these results use exactly the same
-temporal split (2015-2018 train, 2018 FunSearch inner validation, 2019 outer
-validation, refit on 2015-2019, test once on 2022-2023) as the sparse model
-already reported on, so the comparison is apples to apples.
-
-1. LSTM and Gradient Boosting benchmarks (referee section 3.3 / Table 10).
-   Both are pooled (fit once across all provinces, not per-province and not
-   hierarchical), direct one-step-ahead forecasters: given the same
-   lag-stacked state vector (n_lags weeks of history, same n_lags as the
-   winning sparse model) the sparse model's own library is built from, each
-   predicts next week's incidence directly. This keeps the information set
-   identical between the sparse model and these two black-box baselines --
-   nobody sees anything beyond week t when predicting week t+1.
-
-2. A fixed-library, non-LLM, non-hierarchical SINDy-style pooled baseline
-   (referee's "strongly recommended if inexpensive" item). This reuses
-   forecast.py's run_hierarchical_em with fs_terms=[] and llm_formulas=[],
-   so the only candidate terms are the ones hard-coded in build_library()
-   (lag terms, the logistic term, y*z cross terms, seasonal sin/cos terms,
-   cumulative incidence) -- nothing discovered by FunSearch, nothing
-   proposed by the LLM -- and use_cluster=False, use_province=False, so it
-   is a single pooled global fit with no hierarchical decomposition at all.
-   This isolates how much of the sparse model's performance comes from the
-   FunSearch/LLM term discovery and the hierarchy, versus a plain fixed
-   library fit pooled across provinces.
-
-Run this AFTER forecast.py has been run at least once, because it needs
-the saved winning FunSearch program at fs_programs/<label>_best.json to
-pick a matching n_lags, and it needs the same encoder/latent/cluster files
-forecast.py reads.
-
-Usage:
-    python3 benchmark_lstm_gb_sindy.py
-
-Writes to outputs/:
-    lstm_gb_benchmark.csv               -- pooled + mean-per-province R2, LSTM and GB
-    lstm_benchmark_per_province.csv     -- per-province R2/MAE/MSE for the LSTM
-    gb_benchmark_per_province.csv       -- per-province R2/MAE/MSE for Gradient Boosting
-    fixed_library_sindy_pooled.csv      -- val/test R2 for the fixed-library baseline
-    fixed_library_sindy_per_province.csv -- per-province R2/MAE/MSE for it
-    fixed_library_sindy_equation.csv    -- its fitted term list and coefficients
-    benchmark_summary_with_lstm_gb_sindy.csv -- one table combining all of the
-                                                above with the existing naive
-                                                baselines and the already
-                                                reported sparse model result
-"""
 import os
 import sys
 import json
@@ -60,65 +8,43 @@ import torch
 import torch.nn as nn
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import r2_score
-
 warnings.filterwarnings('ignore')
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-
-_stdout_before, _stderr_before = sys.stdout, sys.stderr
-import forecast as F
-# forecast.py redirects stdout/stderr to its own
-# log file as a side effect of import; put ours back so this script's own
-# progress prints go to the console the user is watching.
-sys.stdout, sys.stderr = _stdout_before, _stderr_before
-
-print('[benchmark] imported', F.__name__, '-- data, scaler and splits loaded from it')
-
-OUT_DIR = os.path.join(os.path.dirname(HERE), 'results')  # NOT F.OUT_DIR ('outputs/'), which is unused/stale in this repo -- results/ is where every other output actually lives
+(_stdout_before, _stderr_before) = (sys.stdout, sys.stderr)
+try:
+    import forecast as F
+except ModuleNotFoundError:
+    import forecast_temporal_fix as F
+(sys.stdout, sys.stderr) = (_stdout_before, _stderr_before)
+OUT_DIR = F.OUT_DIR
 os.makedirs(OUT_DIR, exist_ok=True)
-
 train_pd = F._build_province_dict(F.latent, F.TRAIN_YEARS)
 val_pd = F._build_province_dict(F.latent, F.VAL_YEARS)
 trainval_pd = F._build_province_dict(F.latent, F.TRAINVAL_YEARS)
 test_pd = F._build_province_dict(F.latent, F.TEST_YEARS)
-
 quality_df = F.compute_province_quality_scores(train_pd)
 included_provinces = set(quality_df.loc[quality_df['quality_score'] >= F.QUALITY_THRESHOLD, 'province'])
-print(f'[benchmark] {len(included_provinces)} of {len(quality_df)} provinces pass the quality gate')
-
-# Use the same n_lags as the winning sparse model, loaded from its saved
-# FunSearch program, so library/feature depth is directly comparable.
 with open(F.SAVED_FS_JSON) as fh:
     _fs_best = F.Program.from_dict(json.load(fh))
 N_LAGS = max(_fs_best.n_lags, 3)
-print(f'[benchmark] using n_lags={N_LAGS} (matches the winning sparse model)')
-
 MEAN_INC = float(F.SCALER.mean_[F.INC_COL])
 STD_INC = float(F.SCALER.scale_[F.INC_COL])
 STATE_DIM = F.STATE_DIM
-
 
 def _inverse_incidence(y_scaled):
     y_log = y_scaled * STD_INC + MEAN_INC
     return np.expm1(y_log) if F.LOG_INCIDENCE else y_log
 
-
-# ---------------------------------------------------------------------------
-# Shared feature construction: pooled, direct one-step-ahead X -> y(t+1)
-# ---------------------------------------------------------------------------
 def build_pooled_xy(province_data, n_lags):
-    """Pooled X (lag-stacked state, most-recent-first, matching _build_aug's
-    own column order), y_scaled (next-step scaled incidence), and a
-    per-row province label, across every province in province_data."""
-    X_parts, y_parts, prov_parts = [], [], []
-    for prov, pd_t in province_data.items():
+    (X_parts, y_parts, prov_parts) = ([], [], [])
+    for (prov, pd_t) in province_data.items():
         s_obs = pd_t['s_obs']
         if len(s_obs) <= n_lags + 1:
             continue
-        X_aug = F._build_aug(s_obs, n_lags)      # rows correspond to times n_lags .. T-1
-        X_aug = X_aug[:-1]                        # drop the last row, it has no t+1 target
-        y_next = s_obs[n_lags + 1:, F.INC_COL]    # scaled incidence at t+1
+        X_aug = F._build_aug(s_obs, n_lags)
+        X_aug = X_aug[:-1]
+        y_next = s_obs[n_lags + 1:, F.INC_COL]
         n = min(len(X_aug), len(y_next))
         if n <= 0:
             continue
@@ -126,107 +52,63 @@ def build_pooled_xy(province_data, n_lags):
         y_parts.append(y_next[:n])
         prov_parts.append(np.array([prov] * n))
     if not X_parts:
-        return (np.zeros((0, (n_lags + 1) * STATE_DIM), dtype=np.float32),
-                np.zeros((0,), dtype=np.float32), np.array([]))
+        return (np.zeros((0, (n_lags + 1) * STATE_DIM), dtype=np.float32), np.zeros((0,), dtype=np.float32), np.array([]))
     return (np.concatenate(X_parts, axis=0), np.concatenate(y_parts, axis=0), np.concatenate(prov_parts, axis=0))
-
 
 def per_province_r2(y_true_raw, y_pred_raw, prov_labels, included):
     df = pd.DataFrame({'province': prov_labels, 'y_true': y_true_raw, 'y_pred': y_pred_raw})
     rows = []
-    for prov, g in df.groupby('province'):
+    for (prov, g) in df.groupby('province'):
         if len(g) < 2:
             continue
-        rows.append({
-            'province': prov,
-            'r2': float(r2_score(g['y_true'], g['y_pred'])),
-            'mae': float(np.mean(np.abs(g['y_true'] - g['y_pred']))),
-            'mse': float(np.mean((g['y_true'] - g['y_pred']) ** 2)),
-            'n': len(g),
-        })
-    prov_df = pd.DataFrame(rows).sort_values('r2', ascending=False) if rows else pd.DataFrame(
-        columns=['province', 'r2', 'mae', 'mse', 'n'])
+        rows.append({'province': prov, 'r2': float(r2_score(g['y_true'], g['y_pred'])), 'mae': float(np.mean(np.abs(g['y_true'] - g['y_pred']))), 'mse': float(np.mean((g['y_true'] - g['y_pred']) ** 2)), 'n': len(g)})
+    prov_df = pd.DataFrame(rows).sort_values('r2', ascending=False) if rows else pd.DataFrame(columns=['province', 'r2', 'mae', 'mse', 'n'])
     incl = prov_df[prov_df['province'].isin(included)]
     r2_filt = float(incl['r2'].mean()) if len(incl) else float('nan')
-    return prov_df, r2_filt
-
-
-X_train, y_train, prov_train = build_pooled_xy(train_pd, N_LAGS)
-X_val, y_val, prov_val = build_pooled_xy(val_pd, N_LAGS)
-X_trainval, y_trainval, prov_trainval = build_pooled_xy(trainval_pd, N_LAGS)
-X_test, y_test, prov_test = build_pooled_xy(test_pd, N_LAGS)
+    return (prov_df, r2_filt)
+(X_train, y_train, prov_train) = build_pooled_xy(train_pd, N_LAGS)
+(X_val, y_val, prov_val) = build_pooled_xy(val_pd, N_LAGS)
+(X_trainval, y_trainval, prov_trainval) = build_pooled_xy(trainval_pd, N_LAGS)
+(X_test, y_test, prov_test) = build_pooled_xy(test_pd, N_LAGS)
 y_test_raw = _inverse_incidence(y_test)
-
-print(f'[benchmark] pooled rows: train={len(X_train)}  val={len(X_val)}  trainval={len(X_trainval)}  test={len(X_test)}')
-
 rows_summary = []
-
-# ---------------------------------------------------------------------------
-# 1. Gradient Boosting benchmark (pooled, direct one-step forecaster)
-# ---------------------------------------------------------------------------
-print('\n[STAGE] Gradient Boosting benchmark')
-gb = GradientBoostingRegressor(
-    n_estimators=400,
-    max_depth=3,
-    learning_rate=0.03,
-    subsample=0.8,
-    random_state=0,
-    validation_fraction=0.15,
-    n_iter_no_change=20,
-    tol=1e-4,
-)
+gb = GradientBoostingRegressor(n_estimators=400, max_depth=3, learning_rate=0.03, subsample=0.8, random_state=0, validation_fraction=0.15, n_iter_no_change=20, tol=0.0001)
 gb.fit(X_trainval, y_trainval)
 gb_pred_test_raw = _inverse_incidence(gb.predict(X_test))
 gb_test_r2_pooled = float(r2_score(y_test_raw, gb_pred_test_raw))
-gb_prov_df, gb_test_r2_filt = per_province_r2(y_test_raw, gb_pred_test_raw, prov_test, included_provinces)
+(gb_prov_df, gb_test_r2_filt) = per_province_r2(y_test_raw, gb_pred_test_raw, prov_test, included_provinces)
 gb_prov_df.to_csv(os.path.join(OUT_DIR, 'gb_benchmark_per_province.csv'), index=False)
-print(f'  GradientBoosting  test_R2_pooled={gb_test_r2_pooled:.4f}  test_R2_filt={gb_test_r2_filt:.4f}  (n_trees_used={gb.n_estimators_})')
 rows_summary.append({'variant': 'gradient_boosting', 'test_r2_pooled': gb_test_r2_pooled, 'test_r2_mean_per_province': gb_test_r2_filt})
-
-# ---------------------------------------------------------------------------
-# 2. LSTM benchmark (pooled, direct one-step forecaster)
-# ---------------------------------------------------------------------------
-print('\n[STAGE] LSTM benchmark')
 torch.manual_seed(0)
 
-
 def to_sequence(X_flat):
-    """(-1, (n_lags+1)*STATE_DIM), lag-stacked most-recent-block-first (as
-    _build_aug produces it) -> (-1, n_lags+1, STATE_DIM) in chronological
-    (oldest-first) order, the way an LSTM expects a sequence."""
     n = X_flat.shape[0]
     blocks = X_flat.reshape(n, N_LAGS + 1, STATE_DIM)
     return blocks[:, ::-1, :].copy()
 
-
 class LSTMForecaster(nn.Module):
+
     def __init__(self, input_dim, hidden=48):
         super().__init__()
         self.lstm = nn.LSTM(input_dim, hidden, batch_first=True)
         self.head = nn.Linear(hidden, 1)
 
     def forward(self, x):
-        out, _ = self.lstm(x)
+        (out, _) = self.lstm(x)
         return self.head(out[:, -1, :]).squeeze(-1)
-
-
 device = 'cpu'
 BATCH = 256
 MAX_EPOCHS = 150
 PATIENCE = 12
-
 Xtr_seq = torch.tensor(to_sequence(X_train), dtype=torch.float32, device=device)
 ytr = torch.tensor(y_train, dtype=torch.float32, device=device)
 Xva_seq = torch.tensor(to_sequence(X_val), dtype=torch.float32, device=device)
 yva_np = y_val
-
 model_lstm = LSTMForecaster(STATE_DIM).to(device)
-opt = torch.optim.Adam(model_lstm.parameters(), lr=1e-3)
+opt = torch.optim.Adam(model_lstm.parameters(), lr=0.001)
 loss_fn = nn.MSELoss()
-
-best_val_r2, best_epoch, bad_epochs = (-1e9, 0, 0)
+(best_val_r2, best_epoch, bad_epochs) = (-1000000000.0, 0, 0)
 n_train = Xtr_seq.shape[0]
-
 for epoch in range(1, MAX_EPOCHS + 1):
     model_lstm.train()
     perm = torch.randperm(n_train)
@@ -244,19 +126,16 @@ for epoch in range(1, MAX_EPOCHS + 1):
         val_pred = model_lstm(Xva_seq).cpu().numpy()
     val_r2 = r2_score(yva_np, val_pred) if len(yva_np) else float('-inf')
     if val_r2 > best_val_r2:
-        best_val_r2, best_epoch, bad_epochs = (val_r2, epoch, 0)
+        (best_val_r2, best_epoch, bad_epochs) = (val_r2, epoch, 0)
     else:
         bad_epochs += 1
     if epoch == 1 or epoch % 10 == 0:
-        print(f'  [LSTM] epoch {epoch:3d}  train_loss={total_loss / max(n_train, 1):.5f}  val_R2={val_r2:+.4f}  best_epoch={best_epoch}')
+        pass
     if bad_epochs >= PATIENCE:
-        print(f'  [LSTM] early stopping at epoch {epoch}, best epoch was {best_epoch} (val_R2={best_val_r2:+.4f})')
         break
-
-print(f'  [LSTM] refitting fresh on TRAIN+VAL for {best_epoch} epochs (the best-epoch count found above)')
 torch.manual_seed(0)
 model_lstm_final = LSTMForecaster(STATE_DIM).to(device)
-opt2 = torch.optim.Adam(model_lstm_final.parameters(), lr=1e-3)
+opt2 = torch.optim.Adam(model_lstm_final.parameters(), lr=0.001)
 Xtv_seq = torch.tensor(to_sequence(X_trainval), dtype=torch.float32, device=device)
 ytv = torch.tensor(y_trainval, dtype=torch.float32, device=device)
 n_tv = Xtv_seq.shape[0]
@@ -270,65 +149,32 @@ for epoch in range(1, max(best_epoch, 1) + 1):
         loss = loss_fn(pred, ytv[idx])
         loss.backward()
         opt2.step()
-
 model_lstm_final.eval()
 with torch.no_grad():
     Xte_seq = torch.tensor(to_sequence(X_test), dtype=torch.float32, device=device)
     lstm_pred_test_scaled = model_lstm_final(Xte_seq).cpu().numpy()
 lstm_pred_test_raw = _inverse_incidence(lstm_pred_test_scaled)
 lstm_test_r2_pooled = float(r2_score(y_test_raw, lstm_pred_test_raw))
-lstm_prov_df, lstm_test_r2_filt = per_province_r2(y_test_raw, lstm_pred_test_raw, prov_test, included_provinces)
+(lstm_prov_df, lstm_test_r2_filt) = per_province_r2(y_test_raw, lstm_pred_test_raw, prov_test, included_provinces)
 lstm_prov_df.to_csv(os.path.join(OUT_DIR, 'lstm_benchmark_per_province.csv'), index=False)
-print(f'  LSTM  test_R2_pooled={lstm_test_r2_pooled:.4f}  test_R2_filt={lstm_test_r2_filt:.4f}')
 rows_summary.append({'variant': 'lstm', 'test_r2_pooled': lstm_test_r2_pooled, 'test_r2_mean_per_province': lstm_test_r2_filt})
-
 pd.DataFrame(rows_summary).to_csv(os.path.join(OUT_DIR, 'lstm_gb_benchmark.csv'), index=False)
-
-# ---------------------------------------------------------------------------
-# 3. Fixed-library, non-LLM, non-hierarchical SINDy-style pooled baseline
-# ---------------------------------------------------------------------------
-print('\n[STAGE] Fixed-library SINDy pooled baseline (no FunSearch terms, no LLM terms, no hierarchy)')
-fixed_model_train = F.run_hierarchical_em(
-    train_pd, N_LAGS, [], [], label='fixed_library_sindy_pooled_TRAIN', use_cluster=False, use_province=False)
+fixed_model_train = F.run_hierarchical_em(train_pd, N_LAGS, [], [], label='fixed_library_sindy_pooled_TRAIN', use_cluster=False, use_province=False)
 fixed_model_train['q_inc_by_prov'] = F.estimate_province_q_inc(fixed_model_train, train_pd)
-fixed_val_r2, _, _ = F.evaluate_on_split(val_pd, fixed_model_train)
-print(f'  [fixed-library SINDy] val_R2 (fit on TRAIN only) = {fixed_val_r2:.4f}')
-
-fixed_model_final = F.run_hierarchical_em(
-    trainval_pd, N_LAGS, [], [], label='fixed_library_sindy_pooled_FINAL', use_cluster=False, use_province=False)
+(fixed_val_r2, _, _) = F.evaluate_on_split(val_pd, fixed_model_train)
+fixed_model_final = F.run_hierarchical_em(trainval_pd, N_LAGS, [], [], label='fixed_library_sindy_pooled_FINAL', use_cluster=False, use_province=False)
 fixed_model_final['q_inc_by_prov'] = F.estimate_province_q_inc(fixed_model_final, trainval_pd)
-fixed_test_r2, fixed_test_df, _ = F.evaluate_on_split(test_pd, fixed_model_final)
+(fixed_test_r2, fixed_test_df, _) = F.evaluate_on_split(test_pd, fixed_model_final)
 fixed_test_incl = fixed_test_df[fixed_test_df['province'].isin(included_provinces)]
 fixed_test_r2_filt = float(fixed_test_incl['r2'].mean()) if len(fixed_test_incl) else float('nan')
-print(f'  [fixed-library SINDy] test_R2_pooled={fixed_test_r2:.4f}  test_R2_filt={fixed_test_r2_filt:.4f}')
-
 fixed_test_df.to_csv(os.path.join(OUT_DIR, 'fixed_library_sindy_per_province.csv'), index=False)
-active_terms, pruned_terms = F.get_active_and_pruned(fixed_model_final)
-eq_rows = [{'term_name': nm, 'coef_incidence': coef, 'active': True} for nm, coef in active_terms]
+(active_terms, pruned_terms) = F.get_active_and_pruned(fixed_model_final)
+eq_rows = [{'term_name': nm, 'coef_incidence': coef, 'active': True} for (nm, coef) in active_terms]
 eq_rows += [{'term_name': nm, 'coef_incidence': 0.0, 'active': False} for nm in pruned_terms]
-pd.DataFrame(eq_rows).sort_values('coef_incidence', key=lambda s: s.abs(), ascending=False).to_csv(
-    os.path.join(OUT_DIR, 'fixed_library_sindy_equation.csv'), index=False)
-print(f'  [fixed-library SINDy] {len(active_terms)} active terms (see fixed_library_sindy_equation.csv)')
-
-pd.DataFrame([{
-    'variant': 'fixed_library_sindy_pooled',
-    'val_r2': fixed_val_r2,
-    'test_r2': fixed_test_r2,
-    'test_r2_filt': fixed_test_r2_filt,
-    'n_active_terms': len(active_terms),
-}]).to_csv(os.path.join(OUT_DIR, 'fixed_library_sindy_pooled.csv'), index=False)
-
-# ---------------------------------------------------------------------------
-# 4. Combined summary, alongside the existing naive baselines and the
-#    already-reported sparse model result, for one Table-10-style view
-# ---------------------------------------------------------------------------
-print('\n[STAGE] combined benchmark summary')
+pd.DataFrame(eq_rows).sort_values('coef_incidence', key=lambda s: s.abs(), ascending=False).to_csv(os.path.join(OUT_DIR, 'fixed_library_sindy_equation.csv'), index=False)
+pd.DataFrame([{'variant': 'fixed_library_sindy_pooled', 'val_r2': fixed_val_r2, 'test_r2': fixed_test_r2, 'test_r2_filt': fixed_test_r2_filt, 'n_active_terms': len(active_terms)}]).to_csv(os.path.join(OUT_DIR, 'fixed_library_sindy_pooled.csv'), index=False)
 combined_rows = list(rows_summary)
-combined_rows.append({
-    'variant': 'fixed_library_sindy_pooled',
-    'test_r2_pooled': fixed_test_r2,
-    'test_r2_mean_per_province': fixed_test_r2_filt,
-})
+combined_rows.append({'variant': 'fixed_library_sindy_pooled', 'test_r2_pooled': fixed_test_r2, 'test_r2_mean_per_province': fixed_test_r2_filt})
 main_table_path = os.path.join(OUT_DIR, 'main_benchmark_table.csv')
 if os.path.exists(main_table_path):
     existing = pd.read_csv(main_table_path)
@@ -336,7 +182,3 @@ if os.path.exists(main_table_path):
 else:
     combined_df = pd.DataFrame(combined_rows)
 combined_df.to_csv(os.path.join(OUT_DIR, 'benchmark_summary_with_lstm_gb_sindy.csv'), index=False)
-print(combined_df.to_string(index=False))
-print('\n[DONE] wrote lstm_gb_benchmark.csv, lstm_benchmark_per_province.csv, gb_benchmark_per_province.csv,')
-print('       fixed_library_sindy_pooled.csv, fixed_library_sindy_per_province.csv, fixed_library_sindy_equation.csv,')
-print('       and benchmark_summary_with_lstm_gb_sindy.csv to', OUT_DIR)

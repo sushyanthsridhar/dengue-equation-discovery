@@ -1,7 +1,0 @@
-Metric,LLM_mean,LLM_std,Random_mean,Random_std
-Validation R2,0.5201,0.0138,0.4766,0.0227
-Test R2,0.4426,0.0172,0.3531,0.0332
-Valid proposals,28.2,4.4,26.2,1.3
-Parse/validation failures,3.4,4.4,5.4,1.5
-Retained proposals,13.6,2.3,14.8,1.1
-Evaluations to best val. score,7.8,0.4,7.8,0.4

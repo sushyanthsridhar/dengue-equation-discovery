@@ -1,9 +1,0 @@
-Group,Count,Source,Rationale
-Raw meteorological,9,NASA POWER,"Mean/min/max temperature, rainfall, humidity, the full thermal and hydric envelope vector biology responds to"
-Derived meteorological,6,Computed from raw met. variables,"Diurnal temperature range, dry/wet streaks, extreme rainfall, cooling degree days, rainy season phase"
-Additional meteorological,3,NASA POWER,"Solar radiation, wind speed, and dew point influence larval development and adult dispersal"
-Demographic,2,UN population projections,"Population for incidence normalization, school calendar as an exposure proxy"
-Large-scale climate,3,Google Earth Engine,"ENSO indices, Nino 3.4, SOI, TNA, multi-annual climate forcing"
-Spatial/neighbor,4,Computed from own case panel,"Lagged neighbor incidence, cross-border transmission signal"
-Autoregressive,9,Computed from own case panel,"Incidence, lags 1-2, momentum, sine/cosine week encoding"
-Total,36,,

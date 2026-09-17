@@ -1,5 +1,0 @@
-variant,test_r2_pooled,test_r2_mean_per_province
-persistence (y_hat_t+1 = y_t),0.48436478294759444,0.39884203724984474
-seasonal_naive (y_hat_t+1 = y_t+1_minus_52wk),-0.07383474049329908,-0.21346541737154792
-tau9_lasso_spread (last run),,0.4445444139150473
-"tau9_lasso_spread (mean of 5 runs, +/- std)",,0.4403867157605978

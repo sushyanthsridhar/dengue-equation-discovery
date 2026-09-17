@@ -1,1 +1,0 @@
-For each latent dimension that shows up as an LLM-proposed term in the final equation in at least one stability run, correlates that latent against the 14 named raw covariates (temperature, rainfall, rainy season phase, school calendar, etc.) on training years only, so an anonymous latent number can be read as a real-world signal.
